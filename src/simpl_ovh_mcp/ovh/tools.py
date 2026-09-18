@@ -508,7 +508,10 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         client = ovh()
         g = guard()
         results = []
-        for name in (f"*.{sub_domain}", sub_domain):
+        # An empty sub_domain means the zone apex: the wildcard is then '*', not '*.', and
+        # the second record is the apex itself. OVH rejects a subDomain of '*.'.
+        names = ("*", "") if not sub_domain else (f"*.{sub_domain}", sub_domain)
+        for name in names:
             existing_ids = await client.get(
                 f"/domain/zone/{zone}/record", subDomain=name, fieldType="A"
             )
@@ -517,13 +520,15 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
                 await client.put(
                     f"/domain/zone/{zone}/record/{rid}", {"target": target_ip, "ttl": ttl}
                 )
-                results.append({"sub_domain": name, "action": "updated", "id": rid})
+                results.append({"sub_domain": name or "@", "action": "updated", "id": rid})
             else:
                 created = await client.post(
                     f"/domain/zone/{zone}/record",
                     {"fieldType": "A", "subDomain": name, "target": target_ip, "ttl": ttl},
                 )
-                results.append({"sub_domain": name, "action": "created", "id": created.get("id")})
+                results.append(
+                    {"sub_domain": name or "@", "action": "created", "id": created.get("id")}
+                )
         await client.post(f"/domain/zone/{zone}/refresh")
         g.audit("ovh_dns_ensure_wildcard", f"{sub_domain}.{zone}", "applied", {"ip": target_ip})
 
