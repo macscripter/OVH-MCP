@@ -101,7 +101,7 @@ Push this repository, point Railway at it (it reads the `Dockerfile`), then set:
 | Variable | Value |
 |---|---|
 | `SIMPL_MCP_BEARER_TOKEN` | a long random string — **required**, the server refuses to serve writes without one |
-| `SIMPL_MCP_ALLOWED_HOSTS` | your Railway domain, e.g. `simpl-mcp.up.railway.app` |
+| `SIMPL_MCP_ALLOWED_HOSTS` | optional — your Railway domain once it exists; setting it turns Host/Origin checking on |
 | `OVH_APPLICATION_KEY` / `OVH_APPLICATION_SECRET` / `OVH_CONSUMER_KEY` | or `OVH_CLIENT_ID` / `OVH_CLIENT_SECRET` for an OAuth2 service account |
 | `OVH_CLOUD_PROJECT` | the Public Cloud project id |
 | `SIMPL_MCP_MODE` | `readonly`, `operate` or `admin` |

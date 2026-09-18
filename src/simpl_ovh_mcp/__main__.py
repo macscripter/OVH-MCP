@@ -23,10 +23,13 @@ def main() -> None:
             "port": settings.port,
             "path": settings.http_path,
         }
-        # Behind Railway's proxy the Host header is the public domain, which the
-        # DNS-rebinding protection rejects unless it is named here.
+        # Host/Origin checking is off by default in FastMCP, so naming allowed hosts has to
+        # switch it on as well — otherwise the setting reads like a restriction and enforces
+        # nothing. Behind Railway's proxy the Host header is the public domain, so that
+        # domain is what belongs in SIMPL_MCP_ALLOWED_HOSTS.
         if settings.allowed_hosts:
             kwargs["allowed_hosts"] = list(settings.allowed_hosts)
+            kwargs["host_origin_protection"] = True
         print(
             f"simpl-ovh-mcp listening on {settings.host}:{settings.port}{settings.http_path} "
             f"(mode={settings.mode})",
