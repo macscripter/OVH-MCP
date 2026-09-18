@@ -1,0 +1,46 @@
+{{- include "bridge.validate" . -}}
+{{- if .Values.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  # The northbound contract documents the in-cluster server as
+  # bridge.<namespace>.svc.cluster.local, which is why fullnameOverride defaults to
+  # `bridge`. Change it and openapi/bridge-v1.yaml's server variable stops being true.
+  name: {{ include "bridge.fullname" . }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels: {{- include "bridge.labels" . | nindent 4 }}
+    {{- with .Values.service.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if or .Values.commonAnnotations .Values.service.annotations }}
+  annotations:
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.service.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  # ClusterIP only. The Bridge is deployed inside the GA agent (BRG-D-03) and its
+  # endpoints are reachable on the internal agent network; it is not exposed at the agent
+  # edge, and nothing in this chart should make that easy to do by accident.
+  type: {{ .Values.service.type }}
+  {{- with .Values.service.clusterIP }}
+  clusterIP: {{ . }}
+  {{- end }}
+  selector: {{- include "bridge.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ int .Values.service.ports.http }}
+      targetPort: http
+      protocol: TCP
+    {{- if and .Values.management.enabled .Values.service.exposeManagement }}
+    # Health and telemetry. The kubelet reaches the probes on the pod directly, so this
+    # port is only needed by cluster-internal tooling.
+    - name: management
+      port: {{ int .Values.service.ports.management }}
+      targetPort: management
+      protocol: TCP
+    {{- end }}
+{{- end }}

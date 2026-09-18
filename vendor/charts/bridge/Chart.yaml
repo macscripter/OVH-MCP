@@ -1,0 +1,46 @@
+apiVersion: v2
+name: bridge
+
+# Sub-chart of the Governance Authority chart (BRG-D-09). It is never installed on its own in a
+# real deployment: the parent declares it as a dependency with `condition: bridge.enabled`, so a GA
+# agent without a DOME integration simply renders nothing from this directory. The templates repeat
+# that gate with `{{- if .Values.enabled }}` so that a standalone `helm template charts/bridge` for
+# review purposes behaves the same way.
+description: >-
+  DOME Marketplace integration for the Simpl-Open Governance Authority agent: federated real-time
+  TMF620 v4 search (Increment 1) and, from Increment 2, publication of eligible Simpl-Open AI
+  services as DOME product offerings.
+
+type: application
+
+# Chart version tracks the Bridge artefact version in pom.xml (1.0.0-INC1-SNAPSHOT), expressed in
+# SemVer 2 as a pre-release. appVersion is the application version the default image tag resolves to.
+version: 1.0.0-inc1
+appVersion: "1.0.0-INC1"
+
+# Probes use the v1 `startupProbe` semantics and the chart sets `seccompProfile` in the pod security
+# context; both are long-stable, so 1.27 is a conservative floor rather than a hard requirement.
+kubeVersion: ">=1.27.0-0"
+
+keywords:
+  - simpl
+  - simpl-open
+  - governance-authority
+  - dome
+  - marketplace
+  - tmforum
+  - tmf620
+  - camel
+  - quarkus
+
+maintainers:
+  - name: Simpl-Open — Governance Authority / Bridge
+
+annotations:
+  simpl.europa.eu/design-reference: SC3-BRG-TDD-001 v0.3
+  simpl.europa.eu/increment: "1"
+  simpl.europa.eu/decisions: >-
+    BRG-D-03 (deployed inside the GA agent, one GA-level technical identity towards DOME),
+    BRG-D-04 (Apache Camel), BRG-D-08 / BRG-D-11 (TM Forum version pinned per environment, TMF620 v4),
+    BRG-D-09 (Helm sub-chart gated by bridge.enabled), BRG-D-10 (Java 25 / Quarkus 3.33 LTS),
+    BRG-D-12 (Redis read cache), BRG-D-13 (ELK-only observability), BRG-D-14 (secrets from OpenBao).

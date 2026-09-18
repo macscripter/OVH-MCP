@@ -1,0 +1,201 @@
+{{- include "bridge.validate" . -}}
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bridge.fullname" . }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels: {{- include "bridge.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ int .Values.replicaCount }}
+  revisionHistoryLimit: {{ int .Values.revisionHistoryLimit }}
+  {{- with .Values.updateStrategy }}
+  strategy: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "bridge.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "bridge.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # Roll the pods when the rendered configuration changes. Without this a
+        # `helm upgrade` that only touches values would leave every pod on the old
+        # timeout budget until something else happened to restart it.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if and .Values.openbao.enabled (eq .Values.openbao.mode "injector") }}
+        {{- include "bridge.openbaoInjectorAnnotations" . | trim | nindent 8 }}
+        {{- end }}
+        {{- with .Values.commonAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "bridge.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # Long enough to outlive the deepest southbound attempt
+      # (resilience.timeout.maxMs = {{ int .Values.resilience.timeout.maxMs }} ms) plus the
+      # Quarkus shutdown timeout, so a rollout never truncates a live DOME search.
+      terminationGracePeriodSeconds: {{ int .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: bridge
+          image: {{ include "bridge.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ int .Values.containerPorts.http }}
+              protocol: TCP
+            {{- if .Values.management.enabled }}
+            - name: management
+              containerPort: {{ int .Values.containerPorts.management }}
+              protocol: TCP
+            {{- end }}
+          env:
+            # The mounted ConfigMap is loaded as an additional SmallRye config source; its
+            # config_ordinal ({{ int .Values.config.ordinal }}) puts it above the properties
+            # baked into the image.
+            - name: SMALLRYE_CONFIG_LOCATIONS
+              value: {{ printf "%s/application.properties" (trimSuffix "/" .Values.config.mountPath) | quote }}
+            - name: JAVA_OPTS_APPEND
+              value: {{ printf "-XX:MaxRAMPercentage=%v -Djava.io.tmpdir=/tmp %s" .Values.java.maxRamPercentage .Values.java.extraOpts | trim | quote }}
+            - name: KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KUBERNETES_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- if .Values.redis.existingSecret.name }}
+            - name: QUARKUS_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.redis.existingSecret.name | quote }}
+                  key: {{ .Values.redis.existingSecret.passwordKey | quote }}
+            {{- end }}
+            {{- if .Values.elk.elasticsearch.existingSecret.name }}
+            - name: QUARKUS_ELASTICSEARCH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.elk.elasticsearch.existingSecret.name | quote }}
+                  key: {{ .Values.elk.elasticsearch.existingSecret.usernameKey | quote }}
+            - name: QUARKUS_ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.elk.elasticsearch.existingSecret.name | quote }}
+                  key: {{ .Values.elk.elasticsearch.existingSecret.passwordKey | quote }}
+            {{- end }}
+            {{- if and .Values.elk.metrics.enabled .Values.elk.metrics.existingSecret.name }}
+            - name: BRIDGE_METRICS_ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.elk.metrics.existingSecret.name | quote }}
+                  key: {{ .Values.elk.metrics.existingSecret.passwordKey | quote }}
+            {{- end }}
+            {{- if and .Values.openbao.enabled (eq .Values.openbao.mode "existingSecret") }}
+            # Southbound DOME credentials (BRG-D-14). The Secret is synchronised from
+            # OpenBao at {{ .Values.openbao.credentialsPath }} by an operator outside this
+            # chart; the chart only references it, and never holds a value.
+            {{- range $env, $key := .Values.openbao.existingSecret.keys }}
+            - name: {{ $env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.openbao.existingSecret.name | quote }}
+                  key: {{ $key | quote }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.probes.startup.enabled }}
+          # Absorbs JVM start-up so liveness and readiness can both be impatient afterwards.
+          startupProbe:
+            httpGet:
+              path: {{ .Values.probes.startup.path }}
+              port: {{ include "bridge.probePortName" . }}
+            initialDelaySeconds: {{ int .Values.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ int .Values.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ int .Values.probes.startup.timeoutSeconds }}
+            failureThreshold: {{ int .Values.probes.startup.failureThreshold }}
+            successThreshold: {{ int .Values.probes.startup.successThreshold }}
+          {{- end }}
+          {{- if .Values.probes.readiness.enabled }}
+          # Readiness reflects the Bridge only. Redis and Elasticsearch health checks are
+          # disabled in the ConfigMap on purpose: a DOME or cache outage must produce a
+          # degraded 200, not an endpoint that disappears from the Service.
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: {{ include "bridge.probePortName" . }}
+            initialDelaySeconds: {{ int .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ int .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ int .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ int .Values.probes.readiness.failureThreshold }}
+            successThreshold: {{ int .Values.probes.readiness.successThreshold }}
+          {{- end }}
+          {{- if .Values.probes.liveness.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: {{ include "bridge.probePortName" . }}
+            initialDelaySeconds: {{ int .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ int .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ int .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ int .Values.probes.liveness.failureThreshold }}
+            successThreshold: {{ int .Values.probes.liveness.successThreshold }}
+          {{- end }}
+          resources: {{- include "bridge.resources" . | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: {{ .Values.config.mountPath }}
+              readOnly: true
+            # The root filesystem is read-only; the JVM still needs somewhere to put
+            # temporary files, and java.io.tmpdir is pointed here by JAVA_OPTS_APPEND.
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "bridge.fullname" . }}
+            defaultMode: 0444
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

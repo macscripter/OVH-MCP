@@ -1,0 +1,23 @@
+# Railway deployment.
+#
+# Set these variables in the Railway dashboard (never in this file):
+#   SIMPL_MCP_BEARER_TOKEN   required — the server refuses to start an HTTP listener that
+#                            can change things without authentication
+#   SIMPL_MCP_ALLOWED_HOSTS  your Railway domain, e.g. simpl-mcp.up.railway.app
+#   OVH_APPLICATION_KEY / OVH_APPLICATION_SECRET / OVH_CONSUMER_KEY
+#     or OVH_CLIENT_ID / OVH_CLIENT_SECRET
+#   OVH_CLOUD_PROJECT        the Public Cloud project id
+#   SIMPL_MCP_MODE           readonly | operate | admin   (default: operate)
+#
+# Attach a volume at /data so deployment profiles and kubeconfigs survive a redeploy.
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python -m simpl_ovh_mcp"
+healthcheckPath = "/healthz"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5

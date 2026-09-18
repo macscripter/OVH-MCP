@@ -1,0 +1,498 @@
+# =====================================================================================
+# Simpl-Open — Governance Authority — Bridge
+# Sub-chart values (BRG-D-09)
+# =====================================================================================
+#
+# HOW THESE KEYS ARE ADDRESSED
+#
+# This is a SUB-CHART. Everything below lives under the `bridge:` key of the parent
+# Governance Authority chart, so a key written here as
+#
+#     cache:
+#       ttlSeconds: 300
+#
+# is set by an operator as `bridge.cache.ttlSeconds` — exactly the name the design brief
+# and the application's own configuration tree use (BridgeConfig maps `bridge.*` with
+# VERBATIM naming, so the Helm key, the property key and the document all read alike).
+#
+# `enabled` below is the parent's `bridge.enabled` gate from BRG-D-09. It does double
+# duty: the parent's dependency condition drops the manifests entirely, and the value is
+# also written into application.properties so a Bridge that is deployed but switched off
+# starts without its Camel routes rather than starting and failing.
+#
+# SECRETS ARE NEVER VALUES. No credential, password or token belongs in this file or in
+# any override of it. Southbound DOME credentials come from OpenBao at
+# `openbao.credentialsPath` (BRG-D-14); Redis and Elasticsearch credentials come from
+# Secrets that already exist in the namespace. The chart fails to render if it finds a
+# literal secret, see `_helpers.tpl` / `bridge.validate`.
+# =====================================================================================
+
+## Master gate (BRG-D-09). Mirrors the parent chart's `condition: bridge.enabled`.
+enabled: true
+
+## Naming.
+## `fullnameOverride` defaults to `bridge` on purpose: the northbound contract
+## (openapi/bridge-v1.yaml) documents the in-cluster server as
+## `bridge.<namespace>.svc.cluster.local`, and one GA agent hosts exactly one Bridge
+## (BRG-D-03), so the release-prefixed name would only make the documented host wrong.
+## Clear it to fall back to the conventional `<release>-bridge`.
+nameOverride: ""
+fullnameOverride: bridge
+
+## Labels and annotations added to every object this chart renders.
+commonLabels: {}
+commonAnnotations: {}
+
+# -------------------------------------------------------------------------------------
+# Workload
+# -------------------------------------------------------------------------------------
+
+image:
+  ## Leave `registry` empty to use the cluster default registry.
+  registry: ""
+  repository: simpl-open/bridge
+  ## Defaults to the chart's appVersion when empty.
+  tag: ""
+  ## Digest wins over tag when both are set.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+## Two replicas by default: the search path is stateless and DOME unavailability must cost
+## internal search nothing, so losing one pod during a rollout must not take the route out.
+replicaCount: 2
+revisionHistoryLimit: 3
+
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+## A DOME call can legitimately be in flight for the whole timeout budget
+## (`resilience.timeout.maxMs`, 20 s). The grace period is deliberately longer than that
+## plus the Quarkus shutdown timeout, so a rollout never truncates a live search.
+terminationGracePeriodSeconds: 45
+
+podAnnotations: {}
+podLabels: {}
+
+## Reuse a ServiceAccount created by the parent GA chart. This sub-chart intentionally
+## renders no ServiceAccount of its own — identity towards the cluster is the agent's,
+## as identity towards DOME is the agent's (BRG-D-03).
+serviceAccount:
+  name: ""
+  automountServiceAccountToken: false
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 185
+  runAsGroup: 0
+  fsGroup: 185
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  privileged: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 185
+  capabilities:
+    drop:
+      - ALL
+
+## Resource presets, in the style of a Bitnami `resourcePreset`. Pick one by name;
+## anything set in `resources` below overrides the preset wholesale.
+## The default is `small`, sized for a JVM-mode Quarkus service on a small cluster
+## (the local k3d Simpl-Open runs comfortably at this size).
+resourcePreset: small
+resourcePresets:
+  nano:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  micro:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  small:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  medium:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  large:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+
+## Explicit resources. Non-empty means the preset is ignored.
+resources: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+
+## Extra environment variables, volumes and mounts, for anything this chart does not model.
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+## JVM tuning. `maxRamPercentage` is what makes the container memory limit above actually
+## govern the heap; without it the JVM sizes itself from the node, not from the cgroup.
+java:
+  maxRamPercentage: 70.0
+  ## Appended verbatim to the container's JAVA_OPTS_APPEND.
+  extraOpts: ""
+
+# -------------------------------------------------------------------------------------
+# Network surface
+# -------------------------------------------------------------------------------------
+
+## Ports the container listens on. `management` carries /q/health/* and, when a scrape
+## registry is added, /q/metrics — kept off the application port so that probes and
+## telemetry are not reachable from the application network path.
+containerPorts:
+  http: 8080
+  management: 9000
+
+## Quarkus management interface. THIS MUST MATCH HOW THE IMAGE WAS BUILT.
+## quarkus.management.enabled is BUILD_AND_RUN_TIME_FIXED: setting it here changes the
+## rendered ConfigMap but not the running application, which logs a "build time property
+## changed at runtime" warning and carries on. The published image is built without the
+## management interface (there is no quarkus.management.* key in application.properties),
+## so health is served on the application port and the probes follow it.
+## To turn this on, add quarkus.management.enabled=true to application.properties, rebuild
+## the image, and only then set this to true.
+management:
+  enabled: false
+
+service:
+  type: ClusterIP
+  ports:
+    http: 8080
+    management: 9000
+  ## Expose the management port on the Service. Useful for a cluster-internal ELK or
+  ## health dashboard; probes do not need it (kubelet talks to the pod directly).
+  exposeManagement: false
+  clusterIP: ""
+  annotations: {}
+  labels: {}
+
+## Probes. Paths are the Quarkus SmallRye Health endpoints and should not normally change.
+##
+## Deliberately, readiness does NOT depend on DOME, Redis or Elasticsearch: the brief
+## requires that Bridge or DOME unavailability cause zero impact on internal search, and a
+## readiness probe that goes red when an external marketplace is down would turn a degraded
+## response into a removed endpoint. The Redis and Elasticsearch health checks are switched
+## off in the ConfigMap for the same reason.
+probes:
+  startup:
+    enabled: true
+    path: /q/health/started
+    initialDelaySeconds: 5
+    periodSeconds: 2
+    timeoutSeconds: 2
+    failureThreshold: 30
+    successThreshold: 1
+  readiness:
+    enabled: true
+    path: /q/health/ready
+    initialDelaySeconds: 0
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+    successThreshold: 1
+  liveness:
+    enabled: true
+    path: /q/health/live
+    initialDelaySeconds: 0
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+
+# =====================================================================================
+# Application configuration — the `bridge.*` tree
+#
+# Every key below is rendered into application.properties by templates/configmap.yaml
+# under its `bridge.` prefix, and every one of them is read by the running Bridge.
+# =====================================================================================
+
+## Southbound target (BRG-D-08, BRG-D-11).
+##
+## `baseUrl` carries NO version segment: `apiVersion` is appended to it, so pinning the
+## TM Forum version per environment stays a single key. The default is the DOME sandbox
+## verified on 2026-09-12, where reads are anonymous.
+##
+## Effective read URL: <baseUrl>/<apiVersion>/<productOfferingPath>
+dome:
+  baseUrl: https://tmf.sbx.evidenceledger.eu/tmf-api/productCatalogManagement
+  api: TMF620
+  apiVersion: v4
+  productOfferingPath: productOffering
+  ## Forward the northbound X-Correlation-Id to DOME. A correlation aid only — no caller
+  ## credential is ever forwarded southbound (BRG-D-03).
+  propagateCorrelationId: true
+
+  ## How the Bridge proves who it is to DOME. STATIC carries a token issued by hand and is
+  ## for development only; VERIFIER performs the RFC 7523 exchange with the DOME verifier.
+  ## The token itself never appears here: it comes from OpenBao or a Secret (see openbao
+  ## below), and `staticToken` is deliberately absent from this file.
+  auth:
+    mode: STATIC                       # STATIC or VERIFIER
+    ## Refresh the token when fewer than this many seconds remain on it.
+    minRemainingSeconds: 60
+    ## DOME does not enforce the token's expiry, verified against the sandbox. Sending an
+    ## expired one keeps a demonstration alive; a real environment should set this false.
+    sendExpiredStaticToken: true
+    ## VERIFIER mode only.
+    issuer: https://verifier.dome-marketplace-sbx.org/verifier
+    grantType: client_credentials
+    clientAuth: private_key_jwt        # private_key_jwt or client_secret_post
+    tokenRequestTimeoutMs: 5000
+
+## Read path budget and caller-side guardrails.
+##
+## Measured DOME sandbox latency (2026-09-12) tracks the OFFSET, not the page size:
+## offset 0 → 1.8 s, offset 3 → 1.3 s, offset 127 → 11.4 s, offset 200 → 13.2 s. No single
+## flat timeout is right at every depth, which is why `maxOffset` exists and why
+## `resilience.timeout.offsetScaling` below scales the budget with depth.
+search:
+  ## Per-attempt budget. Exceeding it is NOT an error of the northbound API: the caller
+  ## gets HTTP 200 with results: [], degraded: true, degradedReason: TIMEOUT.
+  timeoutMs: 6000
+  defaultLimit: 20
+  ## Never above the contract's 100.
+  maxLimit: 100
+  ## Ceiling on paging.offset. The contract allows 10000; a deployment that cares about
+  ## its DOME budget should cap this far lower — exceeding the cap is a caller-side 400,
+  ## which says nothing about DOME's availability. 10000 is a deliberate, conservative
+  ## default: well past the 128 offerings the sandbox held, well short of a pathological
+  ## deep walk.
+  maxOffset: 10000
+  ## How free-text criteria.keyword is rendered into TMF620 on this instance; TMF620 v4
+  ## has no standard full-text operator, so this is pinned per environment alongside the
+  ## API version. One of NAME_EXACT, NAME_REGEX, UNSUPPORTED.
+  keywordStrategy: NAME_EXACT
+
+  ## What the search does with a criterion DOME would answer wrongly rather than refuse.
+  ## REJECT answers 422 UNTRANSLATABLE_CRITERIA and names the defect; ALLOW_WITH_ADVISORY
+  ## forwards it and attaches a warning. REJECT is the default because an empty page that
+  ## looks like a legitimate answer is worse than a refusal.
+  ## One of REJECT, ALLOW_WITH_ADVISORY.
+  defectPolicy: REJECT
+
+## Redis read cache, cache-aside with TTL (BRG-D-12). A cached page can be up to
+## `ttlSeconds` stale; DOME stays authoritative. Cache faults are never fatal — an
+## unreachable Redis is logged and treated as a miss.
+cache:
+  enabled: true
+  ttlSeconds: 300
+  ## Namespace for cache keys. Carries the northbound contract version so a v2 Bridge can
+  ## never read v1 entries.
+  keyPrefix: simpl:bridge:v1:dome:search
+  ## Consecutive Redis failures before the cache is bypassed, and for how long.
+  failureThreshold: 3
+  failureCooldownSeconds: 30
+  ## Payloads larger than this are passed through but not cached (1 MiB).
+  maxValueBytes: 524288
+  ## Cache empty result pages too. "Nothing matched" is a legitimate, cacheable answer,
+  ## and an offset past the end of the collection is DOME's most expensive request.
+  cacheEmptyPages: true
+
+## Timeout / retry / breaker tuning consumed by the resilience layer around the southbound
+## call (eu.europa.ec.simpl.bridge.resilience.ResilienceConfig, keys bridge.resilience.*).
+## This is the ONLY circuit-breaker tree: when the breaker is open DOME is not called at
+## all and the search answers degradedReason: CIRCUIT_OPEN immediately — the mechanism by
+## which DOME unavailability costs internal search nothing. Durations are milliseconds and
+## `breaker.failureRateThreshold` is a fraction of 1, not a percentage.
+resilience:
+  timeout:
+    ## Scale the per-attempt budget with the requested offset instead of applying one flat
+    ## value. This is the direct consequence of the measured deep-offset behaviour: a
+    ## budget that is generous at offset 0 reliably produces a degraded response at
+    ## offset 120.
+    offsetScaling: true
+    baseMs: 4000
+    perOffsetMs: 120
+    maxMs: 20000
+  retry:
+    maxAttempts: 3
+    initialBackoffMs: 200
+    maxBackoffMs: 2000
+    multiplier: 2.0
+    jitterFactor: 0.3
+    ## Do not retry a timeout. At depth the retry costs the same again and returns the
+    ## same answer; degrading immediately is cheaper for everyone.
+    retryOnTimeout: false
+  breaker:
+    enabled: true
+    slidingWindowSize: 20
+    minimumNumberOfCalls: 8
+    failureRateThreshold: 0.5
+    waitDurationInOpenStateMs: 30000
+    permittedCallsInHalfOpenState: 2
+    ## Offset at or beyond which a request counts as "deep".
+    deepOffsetThreshold: 50
+    ## Deep-offset timeouts are a property of the query, not of DOME's health, so by
+    ## default they do not open the breaker for everyone else.
+    recordDeepOffsetTimeouts: false
+
+## Northbound exposure inside the GA agent. Reachable on the internal agent network only;
+## authentication is the agent's own Keycloak.
+northbound:
+  basePath: /bridge/v1
+  ## Whether the Camel REST DSL publishes the HTTP binding for the search route. Set false
+  ## in a deployment that fronts the same route with the generated JAX-RS resource calling
+  ## direct:bridge-search-v1, so that exactly one component owns the path.
+  restDslEnabled: true
+
+## Write path (Increment 2). Present so the key tree is complete and reviewable.
+publication:
+  ## Lifecycle status a retirement moves an offering to. Retirement is a TMF620
+  ## lifecycleStatus transition, never a southbound DELETE.
+  retirementStatus: Retired
+
+## How long the ledger keeps a finished operation, and how often it is swept. The
+## operation table is the audit record of what was published and when, so this is a
+## retention decision rather than a housekeeping one.
+retention:
+  operationsDays: 365
+  purgeIntervalMs: 3600000
+
+# -------------------------------------------------------------------------------------
+# Secrets — OpenBao (BRG-D-14)
+# -------------------------------------------------------------------------------------
+#
+# Nothing here holds a credential. `credentialsPath` is a LOCATION in OpenBao, and it is
+# rendered into application.properties as `bridge.openbao.credentialsPath` so the running
+# Bridge can report where its southbound identity came from.
+#
+# Default `enabled: false` is a statement of fact, not an oversight: Increment 1's read
+# path is anonymous — `GET /productOffering` on the DOME sandbox was verified on
+# 2026-09-12 to answer 200 with no credentials. The write path is NOT validated
+# (BRG-O-04): DOME's integration guide documents publication as plain REST with no
+# authentication described, and the only documented machine-to-machine route is a
+# LEARCredentialMachine issued to Access Node operators, an architecture this design
+# avoids. So this block is wiring for Increment 2, switched off until DOME answers.
+openbao:
+  enabled: false
+
+  ## Path of the GA agent's DOME technical-identity credentials in OpenBao.
+  credentialsPath: secret/data/simpl/authority01/bridge/dome
+  ## OpenBao / Vault auth role the pod authenticates with.
+  role: simpl-bridge
+
+  ## How the secret reaches the pod. One of:
+  ##   existingSecret — a Kubernetes Secret that some operator (External Secrets, the
+  ##                    OpenBao secrets operator, ...) already syncs from `credentialsPath`.
+  ##   injector       — an OpenBao/Vault agent injector renders the secret into the pod
+  ##                    filesystem, driven by the pod annotations below.
+  mode: existingSecret
+
+  existingSecret:
+    ## Name of the Secret in this namespace. Required when mode is existingSecret.
+    name: ""
+    ## Map of ENVIRONMENT_VARIABLE -> key inside that Secret. Left empty by default
+    ## because Increment 1 needs no southbound credential; Increment 2 fills it in, e.g.
+    ##   BRIDGE_DOME_AUTH_CLIENTID: clientId
+    ##   BRIDGE_DOME_AUTH_CLIENTSECRET: clientSecret
+    keys: {}
+
+  injector:
+    ## Rendered as pod annotations and passed through `tpl`, so `{{ .Values.* }}` works in
+    ## the values. The annotation domain depends on the injector actually deployed in the
+    ## cluster; replace the whole map if yours differs.
+    annotations:
+      vault.hashicorp.com/agent-inject: "true"
+      vault.hashicorp.com/agent-inject-status: "update"
+      vault.hashicorp.com/role: "{{ .Values.openbao.role }}"
+      vault.hashicorp.com/agent-inject-secret-dome-credentials: "{{ .Values.openbao.credentialsPath }}"
+
+# -------------------------------------------------------------------------------------
+# Backing services
+# -------------------------------------------------------------------------------------
+
+## Redis, backing the read cache (BRG-D-12). PostgreSQL remains the only source of truth;
+## nothing is ever served from the cache that DOME did not return.
+redis:
+  ## Comma-separated Redis URIs. Point this at the common-components Redis of the agent.
+  hosts: redis://redis.common01.svc.cluster.local:6379
+  ## Client timeout for a cache operation. Kept far below the search budget: waiting on the
+  ## cache must never be why a search degrades.
+  timeoutMs: 500
+  ## Password from an existing Secret. Leave the name empty for an unauthenticated Redis.
+  existingSecret:
+    name: ""
+    passwordKey: redis-password
+
+## Observability — the existing ELK stack only (BRG-D-13). No Prometheus, no OTLP.
+elk:
+  ## Elasticsearch target for the Camel audit route
+  ## (camel-quarkus-elasticsearch-rest-client).
+  elasticsearch:
+    hosts: elasticsearch.common01.svc.cluster.local:9200
+    existingSecret:
+      name: ""
+      usernameKey: username
+      passwordKey: password
+  ## Micrometer Elastic registry. There is no Quarkus extension for it — the plain
+  ## Micrometer registry is exposed as a CDI bean and configured under
+  ## `bridge.metrics.elastic.*`.
+  metrics:
+    enabled: true
+    host: http://elasticsearch.common01.svc.cluster.local:9200
+    index: simpl-bridge-metrics
+    stepSeconds: 60
+    userName: ""
+    existingSecret:
+      name: ""
+      passwordKey: password
+
+## Application logging. JSON to stdout, picked up by Filebeat into ELK (BRG-D-13).
+logging:
+  json: true
+  level: INFO
+  bridgeLevel: INFO
+  ## Extra `quarkus.log.category."<name>".level` entries, as category -> level.
+  categories: {}
+
+# -------------------------------------------------------------------------------------
+# Rendered configuration file
+# -------------------------------------------------------------------------------------
+
+config:
+  ## Ordinal written as `config_ordinal` at the top of the mounted application.properties.
+  ## 275 is chosen to sit above the application.properties packaged in the image (250) and
+  ## above a config-directory file (260) — otherwise the mounted file would lose every
+  ## conflict — while staying below environment variables (300), so `extraEnv` can still
+  ## override a single key in an emergency without re-rendering the chart.
+  ordinal: 275
+  ## Where the ConfigMap is mounted inside the container.
+  mountPath: /deployments/config
+  ## Free-form properties appended verbatim to the rendered file. Escape hatch for keys
+  ## this chart does not model; do not put secrets here.
+  extraProperties: ""
