@@ -71,3 +71,31 @@ async def test_every_tool_has_a_description(tmp_path):
         for tool in await client.list_tools():
             assert tool.description, f"{tool.name} has no docstring"
             assert len(tool.description) > 40, f"{tool.name}'s description is too thin"
+
+
+@pytest.mark.asyncio
+async def test_a_port_in_the_environment_means_http_not_stdio(monkeypatch, tmp_path):
+    """A hosted deployment that silently speaks stdio answers nothing at all.
+
+    Railway sets PORT. When the image's own defaults are lost — a builder that ignores the
+    Dockerfile, say — the transport has to be inferred rather than assumed.
+    """
+    from simpl_ovh_mcp.settings import Settings
+
+    monkeypatch.delenv("SIMPL_MCP_TRANSPORT", raising=False)
+    monkeypatch.setenv("SIMPL_MCP_STATE_DIR", str(tmp_path))
+
+    monkeypatch.delenv("PORT", raising=False)
+    monkeypatch.delenv("RAILWAY_SERVICE_ID", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    assert Settings.from_env().transport == "stdio"
+
+    monkeypatch.setenv("PORT", "8000")
+    assert Settings.from_env().transport == "http"
+
+    monkeypatch.delenv("PORT")
+    monkeypatch.setenv("RAILWAY_SERVICE_ID", "svc-123")
+    assert Settings.from_env().transport == "http"
+
+    monkeypatch.setenv("SIMPL_MCP_TRANSPORT", "stdio")
+    assert Settings.from_env().transport == "stdio"

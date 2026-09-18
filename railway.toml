@@ -12,7 +12,10 @@
 # Attach a volume at /data so deployment profiles and kubeconfigs survive a redeploy.
 
 [build]
-builder = "dockerfile"
+# Uppercase, and it matters: an unrecognised value is ignored, Railway falls back to
+# Railpack, and a Railpack build has no helm binary and none of the Dockerfile's ENV
+# defaults — which shows up as the server starting in stdio mode and answering nothing.
+builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]

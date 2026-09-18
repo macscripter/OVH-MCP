@@ -123,6 +123,19 @@ class Settings:
         # extra configuration to be reachable.
         port = _int("PORT", _int("SIMPL_MCP_PORT", 8000))
 
+        # A process with a port to serve on is not a stdio process. Defaulting to stdio
+        # regardless produced a server that started cleanly, logged nothing alarming and
+        # answered no request at all — the platform's 502 being the only symptom. An
+        # explicit SIMPL_MCP_TRANSPORT still wins.
+        hosted = bool(
+            os.environ.get("PORT")
+            or os.environ.get("RAILWAY_SERVICE_ID")
+            or os.environ.get("RAILWAY_ENVIRONMENT_NAME")
+        )
+        transport = os.environ.get(
+            "SIMPL_MCP_TRANSPORT", "http" if hosted else "stdio"
+        ).strip().lower()
+
         state_dir = os.environ.get("SIMPL_MCP_STATE_DIR")
         resolved_state = Path(state_dir) if state_dir else _default_state_dir()
         if state_dir:
@@ -141,7 +154,7 @@ class Settings:
             mode=mode,
             allow_destructive=_bool("SIMPL_MCP_ALLOW_DESTRUCTIVE", False),
             tool_groups=groups,
-            transport=os.environ.get("SIMPL_MCP_TRANSPORT", "stdio").strip().lower(),
+            transport=transport,
             host=os.environ.get("SIMPL_MCP_HOST", "0.0.0.0"),
             port=port,
             http_path=os.environ.get("SIMPL_MCP_PATH", "/mcp"),
