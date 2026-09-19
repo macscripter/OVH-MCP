@@ -99,3 +99,35 @@ async def test_a_port_in_the_environment_means_http_not_stdio(monkeypatch, tmp_p
 
     monkeypatch.setenv("SIMPL_MCP_TRANSPORT", "stdio")
     assert Settings.from_env().transport == "stdio"
+
+
+@pytest.mark.asyncio
+async def test_blank_variables_are_treated_as_unset(monkeypatch, tmp_path):
+    """A platform variable created and left empty must not defeat the default.
+
+    Railway (and every other dashboard) happily stores an empty value, and
+    os.environ.get(name, default) then hands back "" instead of the default — which turned
+    a blank OVH_ENDPOINT into "unknown OVH endpoint ''" on every single call.
+    """
+    from simpl_ovh_mcp.settings import Settings
+
+    monkeypatch.setenv("SIMPL_MCP_STATE_DIR", str(tmp_path))
+    for name in (
+        "OVH_ENDPOINT",
+        "DOME_BASE_URL",
+        "BRIDGE_IMAGE_REPOSITORY",
+        "SIMPL_MCP_PATH",
+        "SIMPL_MCP_MODE",
+        "SIMPL_MCP_TRANSPORT",
+        "HELM_BIN",
+    ):
+        monkeypatch.setenv(name, "")
+
+    settings = Settings.from_env()
+    assert settings.ovh_endpoint == "ovh-eu"
+    assert settings.dome_base_url.startswith("https://tmf.sbx.evidenceledger.eu")
+    assert settings.bridge_image_repository == "simpl-open/bridge"
+    assert settings.http_path == "/mcp"
+    assert settings.mode == "operate"
+    assert settings.helm_bin == "helm"
+    assert settings.transport in ("stdio", "http")

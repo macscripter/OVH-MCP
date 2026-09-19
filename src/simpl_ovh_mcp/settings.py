@@ -37,6 +37,20 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _str(name: str, default: str) -> str:
+    """Read a string setting, treating blank as absent.
+
+    Deployment platforms let an operator create a variable and leave its value empty, and
+    `os.environ.get(name, default)` then returns the empty string rather than the default.
+    A blank OVH_ENDPOINT became "unknown OVH endpoint ''" on every call; a blank
+    DOME_BASE_URL became a request to nowhere. Blank means "I did not set this".
+    """
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip()
+
+
 def _csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     raw = os.environ.get(name)
     if not raw:
@@ -113,7 +127,7 @@ class Settings:
     # ----------------------------------------------------------------------------------
     @classmethod
     def from_env(cls) -> Settings:
-        mode = os.environ.get("SIMPL_MCP_MODE", "operate").strip().lower()
+        mode = _str("SIMPL_MCP_MODE", "operate").lower()
         if mode not in MODES:
             mode = "operate"
 
@@ -135,7 +149,7 @@ class Settings:
             or os.environ.get("RAILWAY_SERVICE_ID")
             or os.environ.get("RAILWAY_ENVIRONMENT_NAME")
         )
-        explicit_transport = os.environ.get("SIMPL_MCP_TRANSPORT")
+        explicit_transport = _str("SIMPL_MCP_TRANSPORT", "")
         if explicit_transport:
             transport = explicit_transport.strip().lower()
             transport_source = "SIMPL_MCP_TRANSPORT"
@@ -154,7 +168,7 @@ class Settings:
         default_chart = Path(__file__).resolve().parents[2] / "vendor" / "charts" / "bridge"
 
         return cls(
-            ovh_endpoint=os.environ.get("OVH_ENDPOINT", "ovh-eu").strip(),
+            ovh_endpoint=_str("OVH_ENDPOINT", "ovh-eu"),
             ovh_application_key=os.environ.get("OVH_APPLICATION_KEY") or None,
             ovh_application_secret=os.environ.get("OVH_APPLICATION_SECRET") or None,
             ovh_consumer_key=os.environ.get("OVH_CONSUMER_KEY") or None,
@@ -166,9 +180,9 @@ class Settings:
             tool_groups=groups,
             transport=transport,
             transport_source=transport_source,
-            host=os.environ.get("SIMPL_MCP_HOST", "0.0.0.0"),
+            host=_str("SIMPL_MCP_HOST", "0.0.0.0"),
             port=port,
-            http_path=os.environ.get("SIMPL_MCP_PATH", "/mcp"),
+            http_path=_str("SIMPL_MCP_PATH", "/mcp"),
             bearer_token=os.environ.get("SIMPL_MCP_BEARER_TOKEN") or None,
             allowed_hosts=_csv("SIMPL_MCP_ALLOWED_HOSTS", ()),
             kubeconfig_path=os.environ.get("SIMPL_MCP_KUBECONFIG")
@@ -176,12 +190,12 @@ class Settings:
             or None,
             kubeconfig_inline=os.environ.get("SIMPL_MCP_KUBECONFIG_B64") or None,
             kube_insecure=_bool("SIMPL_MCP_KUBE_INSECURE", False),
-            helm_bin=os.environ.get("HELM_BIN", "helm"),
-            bridge_chart_path=os.environ.get("BRIDGE_CHART_PATH") or str(default_chart),
-            bridge_image_repository=os.environ.get("BRIDGE_IMAGE_REPOSITORY", "simpl-open/bridge"),
-            bridge_image_registry=os.environ.get("BRIDGE_IMAGE_REGISTRY", ""),
-            bridge_image_tag=os.environ.get("BRIDGE_IMAGE_TAG", ""),
-            dome_base_url=os.environ.get(
+            helm_bin=_str("HELM_BIN", "helm"),
+            bridge_chart_path=_str("BRIDGE_CHART_PATH", str(default_chart)),
+            bridge_image_repository=_str("BRIDGE_IMAGE_REPOSITORY", "simpl-open/bridge"),
+            bridge_image_registry=_str("BRIDGE_IMAGE_REGISTRY", ""),
+            bridge_image_tag=_str("BRIDGE_IMAGE_TAG", ""),
+            dome_base_url=_str(
                 "DOME_BASE_URL",
                 "https://tmf.sbx.evidenceledger.eu/tmf-api/productCatalogManagement",
             ),
