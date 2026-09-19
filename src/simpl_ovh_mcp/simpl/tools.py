@@ -411,9 +411,16 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         a private CA instead, for a deployment with no public DNS — browsers will warn, as
         they do on the reference laptop install.
 
-        Let's Encrypt's production rate limit is 50 certificates per registered domain per
-        week; a full Simpl-Open deployment asks for a few dozen, so `acme_staging=True` is
-        worth one dry run if you expect to reinstall repeatedly.
+        **Do not use `acme_staging=True` on a deployment you intend to work.** Simpl-Open's
+        components call each other over their public ingress hostnames and verify the
+        certificate against the system trust store, which does not contain Let's Encrypt
+        staging. The install then fails at openbao-config with "x509: certificate signed by
+        unknown authority", and everything waiting on injected secrets stays Pending. The cost
+        of staging is not a browser warning; it is that the platform refuses itself.
+
+        Production's rate limit is 50 certificates per registered domain per week. A Simpl-Open
+        deployment asks for a handful per namespace, not dozens, so this is rarely the
+        constraint it sounds like.
         """
         p = store().resolve(profile)
         kube = await get_kube(p.name)

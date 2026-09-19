@@ -370,6 +370,33 @@ TRAPS: tuple[Trap, ...] = (
         "refuses to run before that unless forced.",
     ),
     Trap(
+        key="hpa-degraded-under-low-preset",
+        symptom="An agent's ArgoCD application stays Degraded while every pod is Running and "
+        "Ready. The degraded resources are all HorizontalPodAutoscalers reporting "
+        "\"failed to get cpu utilization: no metrics returned matched known pods\".",
+        cause="resourcePreset: low sets CPU and memory requests to 0. A utilization-based "
+        "HPA computes a percentage OF the request, so a request of zero leaves it nothing to "
+        "divide by. The charts also set those autoscalers to minReplicas 1 and maxReplicas 1, "
+        "so they could not scale anything even if they worked.",
+        remedy="Nothing, on a demonstration cluster: the workloads are healthy and the "
+        "autoscalers are inert by configuration. To make the application report Healthy, give "
+        "the deployments real CPU requests — resourcePreset: default, or explicit resources — "
+        "which also means a bigger cluster.",
+        severity="low",
+    ),
+    Trap(
+        key="staging-acme-breaks-trust",
+        symptom="openbao-config fails with \"x509: certificate signed by unknown authority\" "
+        "and every component waiting on injected secrets stays Pending.",
+        cause="Simpl-Open's components call each other over their public ingress hostnames and "
+        "VERIFY the certificate against the system trust store. Let's Encrypt staging is not in "
+        "it. The cost of staging is not that browsers warn — it is that components refuse each "
+        "other and the install stops.",
+        remedy="Use production ACME from the start: simpl_setup_issuers(mode='acme', "
+        "acme_staging=False). If staging certificates were already issued, the Secrets have to "
+        "be re-issued before the components will talk.",
+    ),
+    Trap(
         key="cluster-too-small",
         symptom="Pods stay Pending with FailedScheduling; the cluster looks healthy otherwise.",
         cause="The full platform is sixty pods including Elasticsearch, Kafka and PostgreSQL. "

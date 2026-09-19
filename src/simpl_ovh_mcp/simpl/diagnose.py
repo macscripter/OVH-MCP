@@ -249,6 +249,27 @@ async def diagnose(
             conditions = "; ".join(
                 c.get("message", "")[:200] for c in (status.get("conditions") or [])
             )
+            unhealthy_kinds = {
+                r.get("kind")
+                for r in (status.get("resources") or [])
+                if (r.get("health") or {}).get("status") not in ("Healthy", "Progressing", None)
+            }
+            if unhealthy_kinds == {"HorizontalPodAutoscaler"}:
+                # resourcePreset: low sets CPU requests to 0, and a utilization-based HPA has
+                # nothing to divide by. The autoscalers are min=max=1, so they are inert
+                # anyway. Reporting this as a fault buries the findings that matter.
+                d.add(
+                    "low",
+                    f"ArgoCD application '{app['metadata']['name']}' is Degraded, but only its "
+                    "autoscalers are",
+                    "Every degraded resource is a HorizontalPodAutoscaler that cannot compute "
+                    "CPU utilisation, because resourcePreset: low sets the requests to zero. "
+                    "The workloads themselves are healthy.",
+                    "Nothing, unless you want the application to read Healthy — that needs real "
+                    "CPU requests, and a cluster large enough to honour them.",
+                    trap="hpa-degraded-under-low-preset",
+                )
+                continue
             d.add(
                 "high",
                 f"ArgoCD application '{app['metadata']['name']}' is "

@@ -45,10 +45,17 @@ def test_the_nfs_provisioner_publishes_the_class_the_claim_needs():
 
 
 def test_traps_are_actionable():
+    """Every remedy either names the tool that fixes it, or says plainly that nothing needs
+
+    fixing. A remedy that does neither leaves the reader with a diagnosis and no next step.
+    """
     for trap in TRAPS:
         assert trap.symptom and trap.cause and trap.remedy
-        # A remedy that names no tool is a remedy nobody can follow.
-        assert any(token in trap.remedy for token in ("simpl_", "ovh_", "k8s_", "argocd_", "Name "))
+        names_a_tool = any(
+            token in trap.remedy for token in ("simpl_", "ovh_", "k8s_", "argocd_", "Name ")
+        )
+        says_no_action = trap.remedy.lstrip().lower().startswith("nothing")
+        assert names_a_tool or says_no_action, f"{trap.key} gives the reader nowhere to go"
 
 
 def test_sizings_are_internally_consistent():
