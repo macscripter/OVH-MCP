@@ -370,6 +370,42 @@ TRAPS: tuple[Trap, ...] = (
         "refuses to run before that unless forced.",
     ),
     Trap(
+        key="bridge-needs-a-datasource",
+        symptom="The Bridge crash-loops on start-up with \"Unable to find datasource "
+        "'<default>'\", or with an InactiveBeanException naming org.hibernate.Session and "
+        "eu.europa.ec.simpl.bridge.outbox.OutboxRepository.",
+        cause="The Bridge chart renders no datasource configuration — grep it for 'jdbc' and "
+        "nothing comes back — while the application requires one at boot. Marking Hibernate, "
+        "Flyway and the datasource inactive does not help either: OutboxRepository injects "
+        "org.hibernate.Session directly rather than as Instance<Session>, so the publication "
+        "outbox is constructed eagerly and blocks Increment 1's read path.",
+        remedy="Give it a database, then bridge_deploy with extra_values carrying extraEnv "
+        "entries for QUARKUS_DATASOURCE_DB_KIND, _JDBC_URL, _USERNAME and _PASSWORD. Verified "
+        "working against a database on the agent's own PostgreSQL, with the credentials copied "
+        "into the agent's namespace because Secrets do not cross namespaces. The durable fix is "
+        "the chart's own datasource block, or making the outbox lazy so the read path runs "
+        "stateless.",
+    ),
+    Trap(
+        key="postgres-password-divergence",
+        symptom="After a cluster restart — a scale to zero and back, most obviously — Keycloak, "
+        "identity-provider, authentication-provider, users-roles, security-attributes-provider "
+        "and xsfc-service all crash-loop with "
+        "\"FATAL: password authentication failed for user <agent>_<component>\", and the "
+        "tier2 components stay Pending behind them.",
+        cause="The PostgreSQL passwords have two owners. The postgres-operator generates them "
+        "and keeps them in its own Secrets (<user>.pg-cluster.credentials.postgresql.acid."
+        "zalan.do); the openbao-config chart copies those values into OpenBao ONCE at install "
+        "time, under <agent>-postgres-passwords, and the components read from there. Nothing "
+        "re-synchronises the two afterwards, so anything that changes one side breaks every "
+        "database-backed component at the next restart.",
+        remedy="Re-run the copy: sync the common components application so the openbao-config "
+        "job runs again with argocd_app_sync, then restart the failing deployments with "
+        "k8s_rollout_restart so they read the refreshed values. Verify with k8s_logs that the "
+        "authentication error is gone before declaring it fixed. NOTE: this remedy is reasoned "
+        "from the chart's own mechanism and has not yet been executed against a broken cluster.",
+    ),
+    Trap(
         key="hpa-degraded-under-low-preset",
         symptom="An agent's ArgoCD application stays Degraded while every pod is Running and "
         "Ready. The degraded resources are all HorizontalPodAutoscalers reporting "

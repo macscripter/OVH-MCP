@@ -33,6 +33,9 @@ LOG_SIGNATURES: tuple[tuple[str, str], ...] = (
     ("no such host", "domain-suffix-resolution"),
     ("certificate signed by unknown authority", "missing-issuers"),
     ("x509: certificate", "missing-issuers"),
+    ("password authentication failed for user", "postgres-password-divergence"),
+    ("failed to start quarkus", "bridge-needs-a-datasource"),
+    ("unable to find datasource", "bridge-needs-a-datasource"),
 )
 
 TRAPS_BY_KEY = {t.key: t for t in TRAPS}
