@@ -393,17 +393,35 @@ TRAPS: tuple[Trap, ...] = (
         "and xsfc-service all crash-loop with "
         "\"FATAL: password authentication failed for user <agent>_<component>\", and the "
         "tier2 components stay Pending behind them.",
-        cause="The PostgreSQL passwords have two owners. The postgres-operator generates them "
-        "and keeps them in its own Secrets (<user>.pg-cluster.credentials.postgresql.acid."
-        "zalan.do); the openbao-config chart copies those values into OpenBao ONCE at install "
-        "time, under <agent>-postgres-passwords, and the components read from there. Nothing "
-        "re-synchronises the two afterwards, so anything that changes one side breaks every "
-        "database-backed component at the next restart.",
-        remedy="Re-run the copy: sync the common components application so the openbao-config "
-        "job runs again with argocd_app_sync, then restart the failing deployments with "
-        "k8s_rollout_restart so they read the refreshed values. Verify with k8s_logs that the "
-        "authentication error is gone before declaring it fixed. NOTE: this remedy is reasoned "
-        "from the chart's own mechanism and has not yet been executed against a broken cluster.",
+        cause="NOT ESTABLISHED. The PostgreSQL passwords have two holders — the postgres-"
+        "operator's own Secrets, and a copy that openbao-config writes into OpenBao once at "
+        "install (<agent>-postgres-passwords), which the components read — and after a scale-"
+        "to-zero restart the components' copy was refused by the database. Which side changed, "
+        "and why, was not determined: the operator has password rotation disabled, and re-"
+        "running the openbao-config copy (argocd_app_sync on the common application) did NOT "
+        "restore agreement when tried on 2026-09-19.",
+        remedy="Nothing reliable short of a rebuild. Treat a Simpl-Open cluster as expendable: "
+        "run it, delete it with simpl_teardown, rebuild it from the fixed profile when needed "
+        "(about fifty minutes). Do not park it with a scale-to-zero expecting to resume. If you "
+        "must investigate, compare the operator Secret, the OpenBao value and what the database "
+        "accepts for one user before changing anything.",
+    ),
+    Trap(
+        key="sync-rotates-credentials",
+        symptom="After an ArgoCD sync of the common components application, Kafka, "
+        "simpl-notification, the consumption monitoring service, Redis clients or Redpanda "
+        "start failing authentication, on a platform that was healthy before the sync.",
+        cause="The common_components chart generates its Kafka, Redis, pgAdmin and Redpanda "
+        "passwords with randAlphaNum at TEMPLATE RENDER time (openbao-config, "
+        "templates/secrets.yaml and _helpers.tpl). Every sync renders the chart again and mints "
+        "new values; components already running hold the old ones. \"Just re-sync it\" is "
+        "therefore not a safe recovery action on this platform, and it is exactly the action the "
+        "previous trap's untested remedy recommended.",
+        remedy="Nothing to run — the point is what not to run. Do not argocd_app_sync the common "
+        "application on a live deployment unless you intend to restart every dependent "
+        "component afterwards and can afford the outage. Change values through the deployer "
+        "Application and let ArgoCD's own reconciliation apply them; if a sync is unavoidable, "
+        "follow it with k8s_rollout_restart of everything that consumes those Secrets.",
     ),
     Trap(
         key="hpa-degraded-under-low-preset",
