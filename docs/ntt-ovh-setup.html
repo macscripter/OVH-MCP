@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>simpl-ovh-mcp on the NTT OVHcloud account</title>
+<style>
+@page { size: A4; margin: 18mm 16mm 20mm 16mm; @bottom-center { content: counter(page) " / " counter(pages); font: 9pt sans-serif; color:#777; } }
+body { font: 10.5pt/1.5 "DejaVu Sans", Arial, sans-serif; color:#1a1a1a; max-width: 100%; }
+h1 { font-size: 22pt; margin: 0 0 4pt; }
+h2 { font-size: 15pt; margin: 22pt 0 6pt; border-bottom: 1px solid #bbb; padding-bottom: 3pt; page-break-after: avoid; }
+h3 { font-size: 12pt; margin: 14pt 0 4pt; page-break-after: avoid; }
+.sub { color:#555; margin:0 0 14pt; }
+table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 9.5pt; page-break-inside: avoid; }
+th, td { border: 1px solid #ccc; padding: 4pt 6pt; vertical-align: top; text-align: left; }
+th { background: #f0f0f0; }
+code { font: 9.5pt "DejaVu Sans Mono", monospace; background:#f3f3f3; padding: 0 3px; }
+pre { font: 9pt/1.35 "DejaVu Sans Mono", monospace; background:#f3f3f3; border:1px solid #ddd; padding:6pt 8pt; white-space: pre-wrap; page-break-inside: avoid; }
+.box { border:1px solid #c9a227; background:#fff8e1; padding:6pt 9pt; margin:8pt 0; page-break-inside: avoid; }
+.ok { border-color:#3a7d44; background:#eef7ef; }
+.bad { border-color:#b3261e; background:#fdecea; }
+ol li, ul li { margin-bottom: 3pt; }
+.step { font-weight: bold; }
+.small { font-size: 9pt; color:#555; }
+</style></head><body>
+
+<h1>simpl-ovh-mcp on the NTT OVHcloud account</h1>
+<p class="sub">Step-by-step configuration manual. Version 1.0, 19 September 2026. For the operator of the server. Contains no credentials.</p>
+
+<div class="box">
+<b>What this manual gets you.</b> The same MCP server that deployed Simpl-Open on the personal OVH project, pointed at the NTT OVHcloud account instead, verified end to end, and ready either to inspect the cluster NTT already runs or to create a fresh Simpl-Open deployment in the NTT project. Estimated time: 45 minutes of clicking, most of it on the OVH side, plus 50 minutes if you deploy a new platform.
+</div>
+
+<h2>0. Before you start: what you need</h2>
+<table>
+<tr><th style="width:34%">Item</th><th>Where it comes from</th><th style="width:16%">Have it?</th></tr>
+<tr><td>Access to the NTT OVHcloud account with the right to create <b>service accounts</b> and <b>IAM policies</b></td><td>Account owner or an administrator of the OVH account. If you lack this, steps 2.2 and 2.3 must be done by that person; everything else is yours.</td><td>&#9744;</td></tr>
+<tr><td>The <b>Public Cloud project id</b> (32 hexadecimal characters)</td><td>OVH manager, Public Cloud, project, Settings. Or <code>GET /cloud/project</code>.</td><td>&#9744;</td></tr>
+<tr><td>A <b>DNS zone hosted at OVH</b> in the NTT account</td><td>NTT's existing infrastructure uses <code>sc3poc.xyz</code> through external-dns with the OVH provider, so that zone should already be there. Confirm in Web Cloud, Domain names.</td><td>&#9744;</td></tr>
+<tr><td>A <b>Railway account</b> with the server repository connected</td><td>Already in place for the current deployment.</td><td>&#9744;</td></tr>
+<tr><td>A decision on the <b>Bridge image registry</b></td><td>GitLab container registry if an administrator enables it, or an OVH Managed Private Registry in the NTT project. Section 6 covers both.</td><td>&#9744;</td></tr>
+</table>
+
+<h2>1. One design decision first: a second server, not a re-pointed one</h2>
+<p>The OVH credentials are <b>global to a server instance</b>; deployment profiles are per cluster, but they all use the same OVH identity. So the clean way to work with two OVH accounts is two Railway services from the same repository, each with its own variables, its own bearer token and its own volume. Recommended layout:</p>
+<table>
+<tr><th>Railway service</th><th>OVH account</th><th>Purpose</th></tr>
+<tr><td><code>ovh-mcp</code> (existing)</td><td>personal, project <code>simpl-open-bridge</code></td><td>Keep until the personal project is emptied, then delete.</td></tr>
+<tr><td><code>ovh-mcp-ntt</code> (new)</td><td>NTT</td><td>The one you will use from Monday.</td></tr>
+</table>
+<p>If you would rather re-point the existing service, only steps 3.4 and 4 change: replace the three OVH variables and redeploy. Profiles of the personal cluster stay on the volume and become useless, which is harmless.</p>
+
+<h2>2. On OVHcloud, NTT account</h2>
+
+<h3>2.1 Find the project id</h3>
+<ol>
+<li>Log into <code>www.ovh.com/manager</code> with the NTT account.</li>
+<li>Public Cloud, select the project, then <b>Settings</b> in the left menu. Copy the <b>Project ID</b>.</li>
+<li>Keep it as <code>OVH_CLOUD_PROJECT</code>.</li>
+</ol>
+
+<h3>2.2 Create an OAuth2 service account</h3>
+<ol>
+<li>Top right, your name, <b>Identity and access management</b> (IAM), tab <b>Service accounts</b> (in some regions labelled "OAuth2 clients").</li>
+<li><b>Create a service account</b>. Name it <code>simpl-ovh-mcp-ntt</code>, description "MCP server for Simpl-Open deployment", flow <b>Client credentials</b>.</li>
+<li>OVH shows the <b>client id</b> (looks like <code>EU.xxxxxxxxxxxxxxxx</code>) and the <b>client secret</b> exactly once. Keep both in your password manager. Never paste them anywhere except Railway.</li>
+<li>Note the service account's <b>identity URN</b>, shown on its detail page. It has the form <code>urn:v1:eu:identity:credential:&lt;account&gt;/oauth2-EU.xxxxxxxx</code>. You need it for the policy.</li>
+</ol>
+
+<h3>2.3 Create the IAM policy</h3>
+<p>The service account has no rights until a policy grants them. Two resources, two action families, nothing else.</p>
+<ol>
+<li>IAM, tab <b>Policies</b>, <b>Create a policy</b>.</li>
+<li><b>Name</b>: <code>simpl-ovh-mcp-ntt</code>.</li>
+<li><b>Identities</b>: choose the tab for service accounts and add <code>simpl-ovh-mcp-ntt</code>. (The screen opens on local users and user groups; the service account is under its own tab.)</li>
+<li><b>Resources</b>: add the Public Cloud project and the DNS zone. If the zone is not offered in the picker, create the policy with the project only and add the zone afterwards.</li>
+<li><b>Actions</b>: "all actions" on the selected resources is acceptable for a deployment tool. If you prefer an explicit list, use the two wildcards below.</li>
+</ol>
+<p>Equivalent API call, if you prefer the console at <code>api.ovh.com/console</code> with <code>POST /iam/policy</code>:</p>
+<pre>{
+  "name": "simpl-ovh-mcp-ntt",
+  "identities": ["urn:v1:eu:identity:credential:&lt;account&gt;/oauth2-EU.xxxxxxxx"],
+  "resources": [
+    { "urn": "urn:v1:eu:resource:publicCloudProject:&lt;project-id&gt;" },
+    { "urn": "urn:v1:eu:resource:dnsZone:sc3poc.xyz" }
+  ],
+  "permissions": { "allow": [
+    { "action": "publicCloudProject:apiovh:*" },
+    { "action": "dnsZone:apiovh:*" }
+  ] }
+}</pre>
+<div class="box">
+<b>Check the zone URN type before posting.</b> A zone can be exposed as <code>dnsZone</code> or <code>domain</code>. <code>GET /iam/resource</code> lists the exact URNs the account has. A wrong type is accepted silently and every DNS call then fails with 403.
+</div>
+<p class="small">The policy deliberately excludes the account itself (<code>urn:v1:eu:resource:account:...</code>). The server's <code>ovh_whoami</code> tolerates the resulting 403 on <code>/me</code>; nothing else needs it.</p>
+
+<h3>2.4 Choose the DNS suffix</h3>
+<p>Every Simpl-Open host name is <code>&lt;service&gt;.&lt;agent&gt;.&lt;suffix&gt;</code>, served by one wildcard record. Pick a suffix that does not collide with NTT's existing records, for example <code>mcp.sc3poc.xyz</code>, giving <code>authority.fe.authority01.mcp.sc3poc.xyz</code>. The server creates the wildcard itself in step 6.</p>
+
+<h2>3. On Railway</h2>
+
+<h3>3.1 Create the service</h3>
+<ol>
+<li>In the Railway project, <b>New</b>, <b>GitHub repo</b>, select the server repository. Name the service <code>ovh-mcp-ntt</code>.</li>
+<li>Builder is taken from <code>railway.toml</code> (<code>DOCKERFILE</code>). Do not switch to Railpack; it would build a server without Helm.</li>
+</ol>
+
+<h3>3.2 Attach the volume</h3>
+<ol>
+<li>Service, <b>Volumes</b>, <b>Add volume</b>, mount path <code>/data</code>.</li>
+<li>The image's entrypoint takes ownership of the mount at start, so the root-owned mount is not a problem. Profiles, kubeconfigs and the audit log live here and survive redeploys.</li>
+</ol>
+
+<h3>3.3 Public domain</h3>
+<ol>
+<li>Service, <b>Settings</b>, <b>Networking</b>, <b>Generate domain</b>.</li>
+<li>Target port <b>8080</b>. This is the port the container listens on; a different value gives a permanent 502.</li>
+<li>Note the domain, for example <code>ovh-mcp-ntt-production.up.railway.app</code>.</li>
+</ol>
+
+<h3>3.4 Variables</h3>
+<p>Generate the bearer token on your machine first:</p>
+<pre>openssl rand -hex 32</pre>
+<table>
+<tr><th style="width:36%">Variable</th><th>Value</th></tr>
+<tr><td><code>OVH_ENDPOINT</code></td><td><code>ovh-eu</code></td></tr>
+<tr><td><code>OVH_CLIENT_ID</code></td><td>from step 2.2</td></tr>
+<tr><td><code>OVH_CLIENT_SECRET</code></td><td>from step 2.2</td></tr>
+<tr><td><code>OVH_CLOUD_PROJECT</code></td><td>from step 2.1</td></tr>
+<tr><td><code>SIMPL_MCP_MODE</code></td><td><code>operate</code> (create and change, no deletion). <code>readonly</code> if a colleague only inspects. <code>admin</code> only while deleting.</td></tr>
+<tr><td><code>SIMPL_MCP_ALLOW_DESTRUCTIVE</code></td><td><code>false</code>. Set <code>true</code> only together with <code>admin</code>, for a teardown, then back.</td></tr>
+<tr><td><code>SIMPL_MCP_BEARER_TOKEN</code></td><td>the generated token</td></tr>
+<tr><td><code>SIMPL_MCP_STATE_DIR</code></td><td><code>/data</code></td></tr>
+<tr><td><code>SIMPL_MCP_ALLOWED_HOSTS</code></td><td>the Railway domain from 3.3, without <code>https://</code>. Add it only after the domain exists.</td></tr>
+<tr><td><code>DOME_BASE_URL</code></td><td>optional; the default is the DOME sandbox TMF620 endpoint.</td></tr>
+<tr><td><code>BRIDGE_IMAGE_REGISTRY</code>, <code>BRIDGE_IMAGE_TAG</code></td><td>set after the registry decision (section 6). They can also be passed per call to <code>bridge_deploy</code>.</td></tr>
+</table>
+<div class="box bad">
+<b>Do not set</b> <code>SIMPL_MCP_TRANSPORT</code>. The server detects Railway's <code>PORT</code> and serves HTTP. A copied <code>stdio</code> value produces a server that starts cleanly, listens on nothing and answers 502. Also do not set <code>PORT</code>; Railway injects it. <code>FASTMCP_CHECK_FOR_UPDATES=off</code> is already baked into the image.
+</div>
+<ol start="1">
+<li>Save the variables. Railway redeploys.</li>
+<li>Open the deploy log. The healthy first lines name the transport <code>http</code>, the mode, and the state directory as writable.</li>
+</ol>
+
+<h2>4. Connect a client</h2>
+<p><b>Claude.ai connector</b>: Settings, Connectors, Add custom connector. URL <code>https://&lt;railway-domain&gt;/mcp</code>. Authentication: bearer token, paste the token. The server answers the connector's handshake without OAuth.</p>
+<p><b>Claude Code</b>:</p>
+<pre>claude mcp add --transport http simpl-ovh-ntt https://&lt;railway-domain&gt;/mcp \
+  --header "Authorization: Bearer &lt;token&gt;"</pre>
+<p><b>From a shell</b>, using the repository's driver script, which reads the token from <code>~/.simpl-mcp-token</code>:</p>
+<pre>SIMPL_MCP_URL=https://&lt;railway-domain&gt;/mcp \
+  .venv/bin/python scripts/mcp-call.py ovh_whoami '{}'</pre>
+
+<h2>5. Verify, in this order</h2>
+<table>
+<tr><th style="width:8%">#</th><th style="width:34%">Check</th><th>Expected</th></tr>
+<tr><td>1</td><td><code>curl https://&lt;domain&gt;/healthz</code></td><td>200 without a token. Anything else: the service is not up or the port is wrong.</td></tr>
+<tr><td>2</td><td><code>mcp_info</code></td><td><code>mode: operate</code>, <code>state_dir_writable: true</code>, <code>ovh.auth_mode: oauth2</code>, 70+ tools registered.</td></tr>
+<tr><td>3</td><td><code>ovh_whoami</code></td><td>The NTT account. A 403 on <code>/me</code> alone is fine and reported as such.</td></tr>
+<tr><td>4</td><td><code>ovh_projects_list</code></td><td>Exactly the NTT project(s) the policy allows. If empty: the policy's resource URN is wrong.</td></tr>
+<tr><td>5</td><td><code>ovh_dns_zones</code></td><td>The NTT zone. If empty: the zone URN type (section 2.3).</td></tr>
+<tr><td>6</td><td><code>ovh_kube_list</code></td><td>NTT's existing cluster <code>simpl-managed-cluster</code> (Kubernetes 1.35, region GRA9) appears. Nothing was changed by this.</td></tr>
+<tr><td>7</td><td><code>ovh_registry_list</code></td><td>Empty, or an existing registry if NTT has one.</td></tr>
+</table>
+<div class="box ok">All seven green means the server is correctly wired to the NTT account. Everything from here on is a deployment choice.</div>
+
+<h2>6. Two ways to use it on the NTT account</h2>
+
+<h3>6.A Inspect the cluster NTT already runs</h3>
+<p>NTT deploys with Jenkins and Terraform: cluster <code>simpl-managed-cluster</code>, charts 3.1.x, issuers named <code>dev-prod</code> and <code>dev-selfsigned</code>, OpenBao engine <code>dev-int</code>, domain <code>sc3poc.xyz</code>. The server can attach to it read-only without touching it.</p>
+<ol>
+<li><code>simpl_profile_create(name="ntt-managed", kube_id="&lt;id from ovh_kube_list&gt;", domain_suffix="sc3poc.xyz", dns_zone="sc3poc.xyz", make_active=true)</code></li>
+<li><code>ovh_kubeconfig_fetch()</code>. Credentials are stored on the volume; only the API server URL is returned.</li>
+<li><code>simpl_status()</code>, <code>k8s_pod_health(namespace=...)</code>, <code>simpl_diagnose()</code>, <code>argocd_apps()</code>.</li>
+</ol>
+<div class="box">
+<b>Limit.</b> The install and initialise tools assume the issuer and OpenBao names this server creates. On the NTT cluster use the inspection tools (status, diagnose, logs, events, ArgoCD read) and avoid <code>simpl_install_*</code>, <code>simpl_setup_issuers</code> and <code>argocd_app_sync</code> until the profile carries NTT's names. Syncing the common application on a live platform rotates its Kafka and Redis passwords.
+</div>
+
+<h3>6.B Create a fresh Simpl-Open deployment in the NTT project</h3>
+<p>This is the flow that produced the working platform on the personal project. About 50 minutes, nothing shared with the existing NTT cluster.</p>
+<ol>
+<li class="step">Plan and profile. <code>simpl_plan(agents=["authority"], sizing="demo", region="GRA11", domain_suffix="mcp.sc3poc.xyz")</code>, then <code>simpl_profile_create(name="ntt-dev", region="GRA11", domain_suffix="mcp.sc3poc.xyz", dns_zone="sc3poc.xyz")</code>.</li>
+<li class="step">Cluster. <code>ovh_kube_create(name="simpl-ntt-dev", region="GRA11", flavor_name="b3-16", desired_nodes=2)</code>. Poll <code>ovh_kube_get</code> until READY (3 to 8 minutes), then <code>ovh_kubeconfig_fetch()</code>.</li>
+<li class="step">Platform. <code>simpl_bootstrap_platform()</code>. Wait for the load balancer address in <code>simpl_status()</code>.</li>
+<li class="step">DNS. <code>ovh_dns_ensure_wildcard(zone="sc3poc.xyz", sub_domain="*.mcp", target_ip="&lt;LB address&gt;")</code>, then <code>simpl_verify_dns(deep=true)</code>.</li>
+<li class="step">Issuers and storage. <code>simpl_setup_issuers(mode="acme", acme_email="&lt;team address&gt;", acme_staging=false)</code>. Production ACME, never staging: the platform's own components verify TLS and reject staging certificates. Then <code>simpl_setup_rwx_storage()</code>.</li>
+<li class="step">Common components. <code>simpl_install_common(resource_preset="low")</code>. Watch with <code>simpl_wait</code> and <code>k8s_pod_health(namespace="common01")</code> until 12 pods are ready, 10 to 20 minutes.</li>
+<li class="step">Authority. <code>simpl_install_agent(agent_type="authority")</code>, then <code>simpl_initialize_authority()</code>. 27 pods; trust chain reported VALID by <code>simpl_diagnose()</code>.</li>
+<li class="step">Registry for the Bridge. Either (a) the GitLab container registry, once an administrator enables it: create a deploy token with <code>read_registry</code> and write it as a pull Secret with <code>k8s_apply</code> of a <code>kubernetes.io/dockerconfigjson</code> Secret named <code>gitlab-registry-pull</code> in <code>authority01</code>; or (b) <code>ovh_registry_create(name="simpl-images", region="GRA")</code>, then <code>ovh_registry_user_create(registry_id=..., namespace="authority01")</code>, which writes the pull Secret itself. Build and push the image as documented in the Bridge repository, <code>documents/IMAGE-DISTRIBUTION.md</code>.</li>
+<li class="step">Bridge. <code>bridge_deploy(image_registry="&lt;registry host&gt;", image_tag="1.0.0-INC1-&lt;commit&gt;")</code>, then <code>bridge_status()</code> and <code>bridge_search(...)</code>. The proof is <code>degraded: false</code>, not the 200.</li>
+</ol>
+
+<h2>7. Cost control and shutdown</h2>
+<table>
+<tr><th>Resource</th><th>Billed</th><th>Approximate</th><th>Stops when</th></tr>
+<tr><td>2 × b3-16 nodes</td><td>hourly</td><td>€0.27 / h</td><td>node pool scaled to zero or cluster deleted</td></tr>
+<tr><td>Load balancer, floating IP, gateway</td><td>hourly</td><td>€0.016 / h</td><td>cluster deleted</td></tr>
+<tr><td>Block storage, about 118 GiB</td><td>hourly</td><td>€0.014 / h</td><td>cluster deleted</td></tr>
+<tr><td>Managed Private Registry, SMALL</td><td>hourly</td><td>€0.023 / h (≈€17 / month)</td><td>registry deleted</td></tr>
+<tr><td>Kubernetes control plane</td><td>free</td><td>0</td><td></td></tr>
+</table>
+<div class="box bad">
+<b>Do not park a Simpl-Open cluster.</b> Scaling the nodes to zero and back leaves every database-backed component unable to authenticate, and the cause is not established. Treat the platform as rebuildable: delete it with <code>simpl_teardown(scope="platform")</code> in admin mode with destructive writes enabled, delete the registry with <code>ovh_registry_delete</code>, and rebuild in 50 minutes when it is needed again.
+</div>
+
+<h2>8. Problems seen once, so you do not see them twice</h2>
+<table>
+<tr><th style="width:38%">Symptom</th><th>Cause and fix</th></tr>
+<tr><td>Every request answers 502; log looks healthy</td><td><code>SIMPL_MCP_TRANSPORT=stdio</code> copied into the variables, or the domain's target port is not 8080. Remove the variable; set the port.</td></tr>
+<tr><td><code>Errno 13</code> on <code>/data</code> at start</td><td>Volume mounted root-owned. Fixed in the image's entrypoint; if seen, the image is stale: redeploy.</td></tr>
+<tr><td><code>ovh_whoami</code> reports 403 on <code>/me</code></td><td>Expected with a project-scoped policy. Not a problem.</td></tr>
+<tr><td><code>ovh_projects_list</code> or <code>ovh_dns_zones</code> empty</td><td>Wrong resource URN in the policy, usually the zone type. Check <code>GET /iam/resource</code>.</td></tr>
+<tr><td><code>x509: certificate signed by unknown authority</code> in openbao-config</td><td>Staging ACME issuer. Switch to production and delete the stored TLS Secret so it is reissued.</td></tr>
+<tr><td>Kafka, Keycloak, users-roles crash-looping after a restart</td><td>Parked cluster, see section 7. Rebuild.</td></tr>
+<tr><td>Authentication failures after an ArgoCD sync of the common application</td><td>The chart mints Kafka and Redis passwords at render time; a sync rotates them. Restart the consumers, or avoid syncing that application.</td></tr>
+<tr><td>Bridge pod crash-loops on "Unable to find datasource"</td><td>Image older than commit <code>9cbda97</code>. Use a current build.</td></tr>
+</table>
+
+<h2>9. Security notes</h2>
+<ul>
+<li>The bearer token is the only lock on the server. Treat it like the OVH secret. Rotate it by changing the variable; every client must be updated.</li>
+<li>The server never returns credentials: kubeconfigs, registry passwords and OVH secrets stay on the volume or in the cluster. Tool outputs redact them.</li>
+<li>Give colleagues a <code>readonly</code> instance if they should look but not act. It is a second Railway service with the same OVH variables and <code>SIMPL_MCP_MODE=readonly</code>.</li>
+<li>Every write is recorded in the audit log on the volume; <code>mcp_audit</code> reads it.</li>
+<li>Delete the service account and policy on the personal OVH account once that project is empty.</li>
+</ul>
+
+<p class="small">Naming used above: Railway service <code>ovh-mcp-ntt</code>; OVH service account and policy <code>simpl-ovh-mcp-ntt</code>; profiles <code>ntt-managed</code> (attach) and <code>ntt-dev</code> (fresh); cluster <code>simpl-ntt-dev</code>; suffix <code>mcp.sc3poc.xyz</code>. Change them consistently if NTT has conventions.</p>
+</body></html>
