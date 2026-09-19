@@ -60,3 +60,28 @@ def test_the_error_is_preferred_over_the_last_line():
 
 def test_empty_logs_say_so():
     assert _last_meaningful_line("") == "(no log output)"
+
+
+def test_nslookup_output_is_parsed_past_the_log_timestamps():
+    """Pod logs are timestamped, and a timestamp is not an address.
+
+    The resolver's own address line carries a port and must not be reported as the answer.
+    """
+    from simpl_ovh_mcp.simpl.platform import _addresses_from_nslookup
+
+    logs = "\n".join(
+        [
+            "2026-09-19T01:53:13.798622789Z Server:\t\t10.3.0.10",
+            "2026-09-19T01:53:13.798642106Z Address:\t10.3.0.10:53",
+            "2026-09-19T01:53:13.798648949Z Non-authoritative answer:",
+            "2026-09-19T01:53:13.798658368Z Name:\tauthority.fe.authority01.simpl-open-bridge.eu",
+            "2026-09-19T01:53:13.798661523Z Address: 51.210.2.136",
+        ]
+    )
+    assert _addresses_from_nslookup(logs) == ["51.210.2.136"]
+
+
+def test_getent_output_is_parsed_too():
+    from simpl_ovh_mcp.simpl.platform import _addresses_from_nslookup
+
+    assert _addresses_from_nslookup("51.210.2.136   host.example.eu") == ["51.210.2.136"]

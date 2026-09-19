@@ -18,6 +18,7 @@ ArgoCD sits alongside these as the thing that installs everything else.
 from __future__ import annotations
 
 import asyncio
+import re
 import socket
 from typing import Any
 
@@ -272,15 +273,34 @@ async def resolve_in_cluster(
     return {"status": status, "addresses": addresses, "output": output.strip()[:1200]}
 
 
+IPV4 = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+
+
+def _strip_log_timestamp(line: str) -> str:
+    """Pod logs are read with timestamps, so every line starts with an RFC 3339 stamp.
+
+    Left in place it parses as a getent answer and the caller is told the name resolves to
+    "2026-09-19T01:53:13.798Z" — wrong, and wrong in a way that looks like data.
+    """
+    head, _, rest = line.partition(" ")
+    if rest and head[:4].isdigit() and "T" in head and (":" in head or "Z" in head):
+        return rest.strip()
+    return line
+
+
 def _addresses_from_nslookup(text: str) -> list[str]:
+    """Pull the answered addresses out of nslookup or getent output.
+
+    The first Address line of nslookup names the resolver, not the answer, so lines
+    carrying a port (10.3.0.10:53) are skipped.
+    """
     addresses = []
-    for line in (text or "").splitlines():
-        line = line.strip()
-        if line.lower().startswith("address:") and " " in line:
+    for raw in (text or "").splitlines():
+        line = _strip_log_timestamp(raw.strip())
+        if line.lower().startswith("address:"):
             candidate = line.split(":", 1)[1].strip()
-            if candidate and candidate[0].isdigit() and "#" not in candidate:
+            if IPV4.match(candidate):  # a resolver line reads "10.3.0.10:53" and is skipped
                 addresses.append(candidate)
-        elif line and line[0].isdigit() and " " in line:  # getent output
+        elif line and IPV4.match(line.split()[0] if line.split() else ""):
             addresses.append(line.split()[0])
-    # The first Address line of nslookup is the resolver itself, not the answer.
     return sorted(set(addresses))
