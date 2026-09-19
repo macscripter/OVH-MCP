@@ -52,7 +52,10 @@ def test_traps_are_actionable():
     for trap in TRAPS:
         assert trap.symptom and trap.cause and trap.remedy
         names_a_tool = any(
-            token in trap.remedy for token in ("simpl_", "ovh_", "k8s_", "argocd_", "Name ")
+            token in trap.remedy
+            # Every tool-group prefix this server registers. Omitting one — bridge_ was
+            # missing — makes the test reject a perfectly actionable remedy.
+            for token in ("simpl_", "ovh_", "k8s_", "argocd_", "helm_", "bridge_", "Name ")
         )
         says_no_action = trap.remedy.lstrip().lower().startswith("nothing")
         assert names_a_tool or says_no_action, f"{trap.key} gives the reader nowhere to go"
