@@ -33,22 +33,40 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
     # ================================================================= account =========
     @tk.read
     async def ovh_whoami() -> dict[str, Any]:
-        """Who the server authenticates as, and what that identity is allowed to do.
+        """Who the server authenticates as, and what it can actually reach.
 
-        Start here when anything returns 403: the answer shows the credential's rules, so
-        you can see whether the missing right is /cloud/project/* or /domain/zone/*.
+        Start here when anything returns 403. The answer reports what each probe found
+        rather than failing on the first refusal: a least-privilege credential is *expected*
+        to be denied some of these, and which ones it is denied is the diagnosis.
+
+        /me needs a right on the account resource, which a policy scoped to a cloud project
+        and a DNS zone does not include — and does not need. A 403 there is reported and
+        stepped over, because nothing else in this server reads it.
         """
         client = ovh()
-        me = await client.get("/me")
         result: dict[str, Any] = {
             "auth_mode": client.settings.ovh_auth_mode,
             "endpoint": client.settings.ovh_endpoint,
             "api": client.base_url,
-            "nichandle": me.get("nichandle"),
-            "country": me.get("country"),
-            "organisation": me.get("organisation"),
             "default_cloud_project": client.settings.ovh_cloud_project,
         }
+
+        try:
+            me = await client.get("/me")
+            result["account"] = {
+                "nichandle": me.get("nichandle"),
+                "country": me.get("country"),
+                "organisation": me.get("organisation"),
+            }
+        except UpstreamError as exc:
+            result["account"] = {
+                "readable": False,
+                "detail": str(exc.status or exc),
+                "note": "The credential has no right on the account resource. That is normal "
+                "for a scoped IAM policy and affects nothing: no other tool reads /me. To "
+                "make this line work, add urn:v1:eu:resource:account:<nic> to the policy.",
+            }
+
         try:
             cred = await client.get("/auth/currentCredential")
             result["credential"] = {
@@ -60,6 +78,27 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         except UpstreamError:
             # OAuth2 tokens have no /auth/currentCredential; absence is not a failure.
             result["credential"] = None
+
+        # What the credential can actually do matters more than what it claims to be, so
+        # probe the two paths this server lives on and report each verdict.
+        reach: dict[str, Any] = {}
+        try:
+            projects = await client.get("/cloud/project")
+            reach["cloud_projects"] = {"ok": True, "count": len(projects or [])}
+        except UpstreamError as exc:
+            reach["cloud_projects"] = {"ok": False, "detail": str(exc.status or exc)}
+        try:
+            zones = await client.get("/domain/zone")
+            reach["dns_zones"] = {"ok": True, "zones": zones or []}
+        except UpstreamError as exc:
+            reach["dns_zones"] = {"ok": False, "detail": str(exc.status or exc)}
+        result["reaches"] = reach
+        result["verdict"] = (
+            "Ready for the cluster and DNS steps."
+            if reach.get("cloud_projects", {}).get("ok") and reach.get("dns_zones", {}).get("ok")
+            else "Some paths are refused — see `reaches`. Add the missing resource to the IAM "
+            "policy, or recreate the token with rights on /cloud/* and /domain/*."
+        )
         return result
 
     @tk.read
