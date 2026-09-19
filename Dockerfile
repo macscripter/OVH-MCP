@@ -49,10 +49,20 @@ ENV SIMPL_MCP_STATE_DIR=/data \
     SIMPL_MCP_TRANSPORT=http \
     SIMPL_MCP_HOST=0.0.0.0 \
     BRIDGE_CHART_PATH=/app/vendor/charts/bridge \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    # The entrypoint drops privileges with setpriv, which does not reset the environment,
+    # so HOME would stay /root and every library that caches under it would hit EACCES.
+    HOME=/home/mcp \
+    XDG_DATA_HOME=/home/mcp/.local/share \
+    XDG_CACHE_HOME=/home/mcp/.cache \
+    # No phone-home at boot: a deployment should not depend on PyPI being reachable, and
+    # the check writes a cache file for no benefit here.
+    FASTMCP_CHECK_FOR_UPDATES=off
 
-RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin mcp \
-    && mkdir -p /data && chown -R mcp:0 /data /app
+RUN useradd --uid 10001 --home-dir /home/mcp --create-home --shell /usr/sbin/nologin mcp \
+    && mkdir -p /data /home/mcp/.local/share /home/mcp/.cache \
+    && chown -R mcp:0 /data /app /home/mcp \
+    && chmod -R g+rwX /home/mcp
 
 # The container starts as root and the entrypoint drops to uid 10001 after taking
 # ownership of the mounted volume. Declaring USER here instead would leave the volume
