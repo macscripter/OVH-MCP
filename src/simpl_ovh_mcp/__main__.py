@@ -8,12 +8,40 @@ from __future__ import annotations
 
 import sys
 
+from . import __version__
 from .server import build_server
 from .settings import get_settings
 
 
+def _banner(settings) -> None:
+    """One line saying what this process resolved, and from where.
+
+    Written to stderr, which is free under both transports. Every deployment question so
+    far — is it serving HTTP, on which port, with which credentials, is helm present —
+    is answerable from this line without opening a shell.
+    """
+    import shutil
+
+    print(
+        f"simpl-ovh-mcp {__version__} | transport={settings.transport} "
+        f"[{settings.transport_source}] | port={settings.port} | mode={settings.mode} "
+        f"| state={settings.state_dir} | ovh-auth={settings.ovh_auth_mode} "
+        f"| helm={'yes' if shutil.which(settings.helm_bin) else 'MISSING'}",
+        file=sys.stderr,
+    )
+    if settings.transport == "stdio" and settings.looks_hosted:
+        print(
+            "WARNING: this looks like a hosted deployment (a platform port or RAILWAY_* "
+            "variable is present) but the transport is stdio, so nothing will answer over "
+            "HTTP and the platform will report 502. Unset SIMPL_MCP_TRANSPORT to let it "
+            "infer, or set it to http.",
+            file=sys.stderr,
+        )
+
+
 def main() -> None:
     settings = get_settings()
+    _banner(settings)
     mcp = build_server(settings)
 
     if settings.transport in ("http", "streamable-http"):
@@ -30,11 +58,6 @@ def main() -> None:
         if settings.allowed_hosts:
             kwargs["allowed_hosts"] = list(settings.allowed_hosts)
             kwargs["host_origin_protection"] = True
-        print(
-            f"simpl-ovh-mcp listening on {settings.host}:{settings.port}{settings.http_path} "
-            f"(mode={settings.mode})",
-            file=sys.stderr,
-        )
         mcp.run(**kwargs)
     else:
         mcp.run()

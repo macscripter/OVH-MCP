@@ -79,6 +79,9 @@ class Settings:
 
     # --- Transport --------------------------------------------------------------------
     transport: str = "stdio"
+    # How the transport was decided, for the startup banner. Debugging a server that
+    # "starts fine and answers nothing" is a great deal faster when it says why.
+    transport_source: str = "default"
     host: str = "0.0.0.0"
     port: int = 8000
     http_path: str = "/mcp"
@@ -132,9 +135,16 @@ class Settings:
             or os.environ.get("RAILWAY_SERVICE_ID")
             or os.environ.get("RAILWAY_ENVIRONMENT_NAME")
         )
-        transport = os.environ.get(
-            "SIMPL_MCP_TRANSPORT", "http" if hosted else "stdio"
-        ).strip().lower()
+        explicit_transport = os.environ.get("SIMPL_MCP_TRANSPORT")
+        if explicit_transport:
+            transport = explicit_transport.strip().lower()
+            transport_source = "SIMPL_MCP_TRANSPORT"
+        elif hosted:
+            transport = "http"
+            transport_source = "inferred (PORT or RAILWAY_* present)"
+        else:
+            transport = "stdio"
+            transport_source = "inferred (no port in the environment)"
 
         state_dir = os.environ.get("SIMPL_MCP_STATE_DIR")
         resolved_state = Path(state_dir) if state_dir else _default_state_dir()
@@ -155,6 +165,7 @@ class Settings:
             allow_destructive=_bool("SIMPL_MCP_ALLOW_DESTRUCTIVE", False),
             tool_groups=groups,
             transport=transport,
+            transport_source=transport_source,
             host=os.environ.get("SIMPL_MCP_HOST", "0.0.0.0"),
             port=port,
             http_path=os.environ.get("SIMPL_MCP_PATH", "/mcp"),
@@ -180,6 +191,15 @@ class Settings:
         )
 
     # --- Derived ----------------------------------------------------------------------
+    @property
+    def looks_hosted(self) -> bool:
+        """Is there a platform in front of this process expecting it to serve HTTP?"""
+        return bool(
+            os.environ.get("PORT")
+            or os.environ.get("RAILWAY_SERVICE_ID")
+            or os.environ.get("RAILWAY_ENVIRONMENT_NAME")
+        )
+
     @property
     def has_ovh_credentials(self) -> bool:
         legacy = all((self.ovh_application_key, self.ovh_application_secret, self.ovh_consumer_key))
