@@ -91,3 +91,24 @@ def _const(value):
         return value
 
     return _inner
+
+
+def test_pull_secret_manifest_is_a_valid_dockerconfigjson():
+    """The one place a registry password is handled must produce what kubelet expects."""
+    import base64
+    import json
+
+    from simpl_ovh_mcp.ovh.tools import _pull_secret_manifest
+
+    m = _pull_secret_manifest("ovh-registry-pull", "authority01", "abc.c1.gra.container-registry.ovh.net", "simpl-pull", "s3cr3t")
+    assert m["type"] == "kubernetes.io/dockerconfigjson"
+    assert m["metadata"] == {
+        "name": "ovh-registry-pull",
+        "namespace": "authority01",
+        "annotations": {"simpl-ovh-mcp/registry": "abc.c1.gra.container-registry.ovh.net"},
+    }
+    config = json.loads(base64.b64decode(m["data"][".dockerconfigjson"]))
+    entry = config["auths"]["abc.c1.gra.container-registry.ovh.net"]
+    assert entry["username"] == "simpl-pull"
+    assert entry["password"] == "s3cr3t"
+    assert base64.b64decode(entry["auth"]).decode() == "simpl-pull:s3cr3t"

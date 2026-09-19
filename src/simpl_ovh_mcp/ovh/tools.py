@@ -668,6 +668,155 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             ],
         }
 
+    @tk.read
+    async def ovh_registry_get(registry_id: str, project: str | None = None) -> dict[str, Any]:
+        """One registry's status and URL. Poll it after ovh_registry_create until READY.
+
+        The `url` is what goes into the Bridge's `image.registry`, without the scheme.
+        """
+        client = ovh()
+        service = client.project(project)
+        r = await client.get(f"/cloud/project/{service}/containerRegistry/{registry_id}")
+        return _registry_summary(r)
+
+    @tk.write
+    async def ovh_registry_create(
+        name: str,
+        region: str = "GRA",
+        plan: str = "SMALL",
+        project: str | None = None,
+        profile: str | None = None,
+    ) -> dict[str, Any]:
+        """Order a Managed Private Registry (Harbor) inside the Public Cloud project.
+
+        This is the registry that removes the last dependency on anyone's personal
+        account: images built from the shared Git repository are pushed here, and the
+        cluster pulls them with a registry user created by ovh_registry_user_create.
+
+        `region` is the registry's own region code — GRA, DE, BHS — not a Kubernetes region
+        like GRA11. `plan` is SMALL (200 GB), MEDIUM (600 GB, vulnerability scanning) or
+        LARGE. SMALL is billed hourly at roughly 17 EUR a month. The registry takes a few
+        minutes to reach READY; poll ovh_registry_get.
+        """
+        client = ovh()
+        service = client.project(project)
+        capabilities = await client.get(f"/cloud/project/{service}/capabilities/containerRegistry")
+        plan_id = None
+        regions = []
+        for entry in capabilities or []:
+            regions.append(entry.get("regionName"))
+            if entry.get("regionName") == region:
+                for candidate in entry.get("plans") or []:
+                    if (candidate.get("name") or "").upper() == plan.upper():
+                        plan_id = candidate.get("id")
+        if plan_id is None:
+            raise NotFound(
+                f"no plan '{plan}' in registry region '{region}'",
+                f"Regions offering a registry: {', '.join(r for r in regions if r)}. "
+                "Plans: SMALL, MEDIUM, LARGE.",
+            )
+        body = {"name": name, "region": region, "planID": plan_id}
+        guard().audit("ovh_registry_create", f"{service}/{name}", "attempt", body)
+        created = await client.post(f"/cloud/project/{service}/containerRegistry", body)
+        guard().audit("ovh_registry_create", f"{service}/{created.get('id')}", "accepted")
+        if profile:
+            p = store().get(profile)
+            p.platform["registry"] = {"id": created.get("id"), "name": name, "region": region}
+            store().save(p)
+        return {
+            "registry": _registry_summary(created),
+            "next": "Poll ovh_registry_get until status is READY, then ovh_registry_user_create.",
+        }
+
+    @tk.write
+    async def ovh_registry_user_create(
+        registry_id: str,
+        namespace: str,
+        secret_name: str = "ovh-registry-pull",
+        login: str = "simpl-pull",
+        project: str | None = None,
+        profile: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a registry user and write it into the cluster as an image pull Secret.
+
+        The password OVH returns exists exactly once, in this call, and goes straight into
+        a `kubernetes.io/dockerconfigjson` Secret in `namespace`. It is not returned and
+        not logged. Reference the Secret from the chart's `imagePullSecrets`.
+
+        Run it once per namespace that pulls from the registry.
+        """
+        from ..kube.session import get_kube
+
+        client = ovh()
+        service = client.project(project)
+        registry = await client.get(f"/cloud/project/{service}/containerRegistry/{registry_id}")
+        url = registry.get("url") or ""
+        if not url or registry.get("status") != "READY":
+            raise NotFound(
+                f"registry {registry_id} is {registry.get('status')} and has no URL yet",
+                "Wait for READY with ovh_registry_get.",
+            )
+        host = url.split("://", 1)[-1].rstrip("/")
+        user = await client.post(
+            f"/cloud/project/{service}/containerRegistry/{registry_id}/users", {"login": login}
+        )
+        password = user.get("password")
+        username = user.get("user") or login
+        if not password:
+            raise UpstreamError("OVH API", None, "the registry user was created without a password")
+
+        kube = await get_kube(profile)
+        await kube.apply(
+            {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}}
+        )
+        await kube.apply(_pull_secret_manifest(secret_name, namespace, host, username, password))
+        guard().audit(
+            "ovh_registry_user_create",
+            f"{service}/{registry_id}",
+            "secret written",
+            {"namespace": namespace, "secret": secret_name, "user": username},
+        )
+        if profile:
+            p = store().get(profile)
+            p.platform.setdefault("registry", {})["url"] = host
+            p.platform["registry"].setdefault("pull_secrets", {})[namespace] = secret_name
+            store().save(p)
+        return {
+            "registry_url": host,
+            "user": username,
+            "pull_secret": f"{namespace}/{secret_name}",
+            "note": "The password went into the Secret and nowhere else. To push from a "
+            "machine, create a second user for that machine rather than reusing this one.",
+            "image_values": {"image": {"registry": host}, "imagePullSecrets": [{"name": secret_name}]},
+        }
+
+    @tk.destructive
+    async def ovh_registry_delete(
+        registry_id: str, project: str | None = None, confirm: str | None = None
+    ) -> dict[str, Any]:
+        """Delete a Managed Private Registry and every image in it."""
+        client = ovh()
+        service = client.project(project)
+        g = guard()
+        g.require_destructive("ovh_registry_delete")
+        target = f"{service}/registry/{registry_id}"
+        if not confirm:
+            r = await client.get(f"/cloud/project/{service}/containerRegistry/{registry_id}")
+            impact = (
+                f"Deletes registry '{r.get('name')}' ({registry_id}) and all images in it "
+                f"({round((r.get('size') or 0) / 1e9, 2)} GB). Pods still referencing them "
+                "will fail to pull after their nodes' image cache expires."
+            )
+            return {
+                "confirmation_required": True,
+                "impact": impact,
+                "confirm_token": g.issue_token(target, impact),
+            }
+        g.check_token("ovh_registry_delete", target, confirm)
+        await client.delete(f"/cloud/project/{service}/containerRegistry/{registry_id}")
+        g.audit("ovh_registry_delete", target, "deleted")
+        return {"deleted": registry_id}
+
     # ================================================================= escape hatch ====
     @tk.read
     async def ovh_api_get(path: str, params: dict[str, Any] | None = None) -> Any:
@@ -797,3 +946,43 @@ def _kubeconfig_server(content: str) -> str | None:
         if line.startswith("server:"):
             return line.split("server:", 1)[1].strip()
     return None
+
+def _registry_summary(r: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": r.get("id"),
+        "name": r.get("name"),
+        "region": r.get("region"),
+        "status": r.get("status"),
+        "url": r.get("url"),
+        "version": r.get("version"),
+        "size_gb": round((r.get("size") or 0) / 1e9, 2),
+        "created_at": r.get("createdAt"),
+    }
+
+
+def _pull_secret_manifest(
+    name: str, namespace: str, host: str, username: str, password: str
+) -> dict[str, Any]:
+    """A kubernetes.io/dockerconfigjson Secret for one registry host.
+
+    Built here rather than by hand so the one place a registry password is handled is
+    also the one place it is tested.
+    """
+    import base64
+    import json as _json
+
+    auth = base64.b64encode(f"{username}:{password}".encode()).decode()
+    config = {"auths": {host: {"username": username, "password": password, "auth": auth}}}
+    return {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "type": "kubernetes.io/dockerconfigjson",
+        "metadata": {
+            "name": name,
+            "namespace": namespace,
+            "annotations": {"simpl-ovh-mcp/registry": host},
+        },
+        "data": {
+            ".dockerconfigjson": base64.b64encode(_json.dumps(config).encode()).decode()
+        },
+    }

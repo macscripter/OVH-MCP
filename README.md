@@ -22,7 +22,7 @@ domain layer did not anticipate is still reachable.
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**81 tools**, three resources, three prompts. Python 3.11+, FastMCP 4, no kubectl.
+**85 tools**, three resources, three prompts. Python 3.11+, FastMCP 4, no kubectl.
 
 ---
 
@@ -172,12 +172,15 @@ from a GitLab checkout in the CI toolchain (`maven:3.9-eclipse-temurin-25`) and 
 commit as `VCS_REF`, so `org.opencontainers.image.revision` on the running container names
 the shared commit.
 
-**The image registry is a temporary arrangement.** CI is disabled on the GitLab project
-(`jobs_enabled: false`, no runners) and its container registry exposes no host, so
-`.gitlab-ci.yml` cannot build or publish anything yet. Until an administrator enables CI
-and the registry on umane, images are pushed to `ghcr.io/macscripter/simpl-dome-bridge`
-by hand and the cluster pulls them through a `ghcr-pull` Secret. That is a dependency on
-one person's GitHub account, and the first thing to remove once the pipeline can run.
+**The image registry lives in the OVH project, not in anyone's GitHub.** CI is disabled
+on the GitLab project (`jobs_enabled: false`, no runners) and its container registry
+exposes no host, so `.gitlab-ci.yml` cannot build or publish anything yet. The image is
+therefore built from a GitLab checkout and pushed to an OVH Managed Private Registry in
+the same Public Cloud project: `ovh_registry_create` orders it (SMALL plan, ≈€17/month),
+`ovh_registry_user_create` makes a pull user and writes it straight into the cluster as an
+image pull Secret — the password is never returned — and `bridge_deploy` references that
+Secret. Nothing in the deployed system then depends on a personal account. The
+`ghcr.io/macscripter/…` images used during the first deployment are history, not a path.
 
 ---
 
@@ -186,7 +189,7 @@ one person's GitHub account, and the first thing to remove once the pipeline can
 | Group | Count | What is in it |
 |---|---:|---|
 | `meta` | 2 | `mcp_info` (mode, credentials, active profile), `mcp_audit` |
-| `ovh` | 21 | projects, quotas, Kubernetes clusters and node pools, kubeconfigs, DNS zones and records, registries, and `ovh_api_get` / `ovh_api_call` for everything else OVH exposes |
+| `ovh` | 25 | projects, quotas, Kubernetes clusters and node pools, kubeconfigs, DNS zones and records, a private registry with pull Secrets written into the cluster, and `ovh_api_get` / `ovh_api_call` for everything else OVH exposes |
 | `k8s` | 15 | cluster info, generic list/get/apply/delete, pod health, logs, events, storage, secret key names, service proxy, rollout restart, scale |
 | `helm` | 7 | repos, releases, values, render, install, uninstall |
 | `argocd` | 8 | applications, resource trees, sync, refresh, terminate, delete — all through the API server proxy |
