@@ -177,6 +177,7 @@ def _register_meta(mcp: FastMCP, settings: Settings, toolkits: list[Toolkit]) ->
             "kubernetes": {"credentials": kube_source},
             "helm": shutil.which(settings.helm_bin) or "not found",
             "state_dir": str(settings.state_dir),
+            "state_dir_writable": settings.state_dir_writable,
             "profiles": store.list(),
             "active_profile": active,
             "dome_base_url": settings.dome_base_url,

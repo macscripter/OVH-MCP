@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .errors import NotFound
+from .errors import ConfigError, NotFound
 from .settings import get_settings
 
 
@@ -124,10 +124,20 @@ class ProfileStore:
     def save(self, profile: Profile) -> Profile:
         profile.updated_at = _now()
         path = self._path(profile.name)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(profile.to_dict(), indent=2, default=str), encoding="utf-8")
-        os.replace(tmp, path)  # atomic: a crash mid-write never leaves a half profile
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(profile.to_dict(), indent=2, default=str), encoding="utf-8")
+            os.replace(tmp, path)  # atomic: a crash mid-write never leaves a half profile
+        except OSError as exc:
+            raise ConfigError(
+                f"cannot write to the state directory {self.root}: {exc.strerror or exc}",
+                "A persistent volume is usually mounted owned by root while this server runs "
+                "as an unprivileged user. The image's entrypoint takes ownership at start-up, "
+                "so redeploying on the current image fixes it; otherwise point "
+                "SIMPL_MCP_STATE_DIR somewhere writable and accept that profiles will not "
+                "survive a restart.",
+            ) from exc
         return profile
 
     def delete(self, name: str) -> None:

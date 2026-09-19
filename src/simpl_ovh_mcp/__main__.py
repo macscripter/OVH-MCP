@@ -25,10 +25,20 @@ def _banner(settings) -> None:
     print(
         f"simpl-ovh-mcp {__version__} | transport={settings.transport} "
         f"[{settings.transport_source}] | port={settings.port} | mode={settings.mode} "
-        f"| state={settings.state_dir} | ovh-auth={settings.ovh_auth_mode} "
+        f"| state={settings.state_dir}"
+        f"{'' if settings.state_dir_writable else ' [NOT WRITABLE]'} "
+        f"| ovh-auth={settings.ovh_auth_mode} "
         f"| helm={'yes' if shutil.which(settings.helm_bin) else 'MISSING'}",
         file=sys.stderr,
     )
+    if not settings.state_dir_writable:
+        print(
+            f"WARNING: {settings.state_dir} is not writable by this process, so deployment "
+            "profiles and kubeconfigs cannot be stored. A platform volume is typically owned "
+            "by root; this image's entrypoint takes ownership at start-up, so check that the "
+            "container started as root.",
+            file=sys.stderr,
+        )
     if settings.transport == "stdio" and settings.looks_hosted:
         print(
             "WARNING: this looks like a hosted deployment (a platform port or RAILWAY_* "

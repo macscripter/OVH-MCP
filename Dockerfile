@@ -52,8 +52,13 @@ ENV SIMPL_MCP_STATE_DIR=/data \
     PYTHONUNBUFFERED=1
 
 RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin mcp \
-    && mkdir -p /data && chown -R mcp:mcp /data /app
-USER mcp
+    && mkdir -p /data && chown -R mcp:0 /data /app
+
+# The container starts as root and the entrypoint drops to uid 10001 after taking
+# ownership of the mounted volume. Declaring USER here instead would leave the volume
+# root-owned and unwritable — the platform mounts it after the image is built.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8000
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["python", "-m", "simpl_ovh_mcp"]

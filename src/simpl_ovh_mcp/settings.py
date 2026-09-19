@@ -206,6 +206,18 @@ class Settings:
 
     # --- Derived ----------------------------------------------------------------------
     @property
+    def state_dir_writable(self) -> bool:
+        """Can this process actually persist anything? Worth knowing before it matters."""
+        try:
+            self.state_dir.mkdir(parents=True, exist_ok=True)
+            probe = self.state_dir / ".write-probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            return True
+        except OSError:
+            return False
+
+    @property
     def looks_hosted(self) -> bool:
         """Is there a platform in front of this process expecting it to serve HTTP?"""
         return bool(
