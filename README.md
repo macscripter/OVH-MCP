@@ -165,6 +165,20 @@ sandbox directly from the server and tells DOME's problem from ours.
 The chart is vendored at `vendor/charts/bridge`; refresh it with
 `scripts/sync-bridge-chart.sh` after any change in the Bridge repository.
 
+**Source of truth for the Bridge is GitLab** —
+`https://umane.emeal.nttdata.com/git/IODOMEIOSIMPLDOME/simpl-open-bridge`, branch `main`.
+`github.com/macscripter/simpl-dome-bridge` is a mirror of the same commits. Build the image
+from a GitLab checkout in the CI toolchain (`maven:3.9-eclipse-temurin-25`) and pass the
+commit as `VCS_REF`, so `org.opencontainers.image.revision` on the running container names
+the shared commit.
+
+**The image registry is a temporary arrangement.** CI is disabled on the GitLab project
+(`jobs_enabled: false`, no runners) and its container registry exposes no host, so
+`.gitlab-ci.yml` cannot build or publish anything yet. Until an administrator enables CI
+and the registry on umane, images are pushed to `ghcr.io/macscripter/simpl-dome-bridge`
+by hand and the cluster pulls them through a `ghcr-pull` Secret. That is a dependency on
+one person's GitHub account, and the first thing to remove once the pipeline can run.
+
 ---
 
 ## Tools

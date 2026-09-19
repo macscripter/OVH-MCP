@@ -374,17 +374,17 @@ TRAPS: tuple[Trap, ...] = (
         symptom="The Bridge crash-loops on start-up with \"Unable to find datasource "
         "'<default>'\", or with an InactiveBeanException naming org.hibernate.Session and "
         "eu.europa.ec.simpl.bridge.outbox.OutboxRepository.",
-        cause="The Bridge chart renders no datasource configuration — grep it for 'jdbc' and "
-        "nothing comes back — while the application requires one at boot. Marking Hibernate, "
-        "Flyway and the datasource inactive does not help either: OutboxRepository injects "
-        "org.hibernate.Session directly rather than as Instance<Session>, so the publication "
-        "outbox is constructed eagerly and blocks Increment 1's read path.",
-        remedy="Give it a database, then bridge_deploy with extra_values carrying extraEnv "
-        "entries for QUARKUS_DATASOURCE_DB_KIND, _JDBC_URL, _USERNAME and _PASSWORD. Verified "
-        "working against a database on the agent's own PostgreSQL, with the credentials copied "
-        "into the agent's namespace because Secrets do not cross namespaces. The durable fix is "
-        "the chart's own datasource block, or making the outbox lazy so the read path runs "
-        "stateless.",
+        cause="Before GitLab main 9cbda97 the application required a datasource at boot even "
+        "with publication off: the persistence unit started eagerly, and OutboxRepository "
+        "injected the EntityManager directly, so Increment 2's outbox blocked Increment 1's read "
+        "path. Images built from an older commit still behave that way.",
+        remedy="Deploy a Bridge built from GitLab main at 9cbda97 or later: persistence now "
+        "follows bridge.publication.enabled, and the outbox resolves its EntityManager lazily, so "
+        "the read-only Bridge boots with no database at all. Only a deployment that switches "
+        "publication on needs one — then bridge_deploy with extra_values carrying extraEnv for "
+        "QUARKUS_DATASOURCE_DB_KIND, _JDBC_URL, _USERNAME and _PASSWORD, with the credentials "
+        "copied into the agent's namespace because Secrets do not cross namespaces. The chart's "
+        "own datasource block is still owed (T20).",
     ),
     Trap(
         key="postgres-password-divergence",
