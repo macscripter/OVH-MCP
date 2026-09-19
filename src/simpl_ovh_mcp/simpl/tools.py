@@ -700,8 +700,12 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             "agent_type": agent_type,
             "namespace": namespace,
             "chart": f"{CHARTS[agent_type].chart} {manifest['spec']['source']['targetRevision']}",
-            "next": "Watch with simpl_status. For an authority, tier2-gateway, tier2-proxy and "
-            "users-roles stay unhealthy until the trust chain is initialised.",
+            "next": "Watch with simpl_status. The deployer generates an Application named "
+            f"'{namespace}', and ArgoCD picks it up on its own reconciliation cycle — up to "
+            "about three minutes, during which the namespace is empty and nothing appears to "
+            f"be happening. argocd_app_sync('{namespace}') starts it immediately. For an "
+            "authority, tier2-gateway, tier2-proxy and users-roles stay unhealthy until the "
+            "trust chain is initialised.",
         }
 
     # =============================================================== operate ===========

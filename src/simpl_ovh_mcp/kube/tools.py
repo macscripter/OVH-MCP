@@ -181,7 +181,11 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             "totals": {k: v for k, v in counts.items() if v},
             "pod_count": len(pods),
             "problems": rows,
-            "healthy": not rows,
+            # An empty namespace has no problems and no health either. Reporting it as
+            # healthy makes "wait until healthy" return immediately on a namespace whose
+            # workloads have not been created yet, which reads as success.
+            "healthy": bool(pods) and not rows,
+            "empty": not pods,
         }
 
     @tk.read
