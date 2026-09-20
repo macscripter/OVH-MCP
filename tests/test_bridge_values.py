@@ -106,3 +106,12 @@ def test_sample_sd_is_found_next_to_the_vendored_chart(tmp_path):
     missing = Settings(bridge_chart_path=str(tmp_path / "nowhere" / "charts" / "bridge"))
     found = _sample_sd_path(missing)
     assert found is None or found.exists()
+
+
+def test_cache_points_at_the_agents_own_redis_with_its_secret():
+    v = _values(agent_namespace="authority01")
+    assert v["redis"]["hosts"] == "redis://redis-master.authority01.svc.cluster.local:6379"
+    assert v["redis"]["existingSecret"] == {"name": "redis-secrets", "passwordKey": "redis"}
+    assert _looks_like_secret(v) == []
+    other = _values(agent_namespace="consumer01")
+    assert "consumer01" in other["redis"]["hosts"]

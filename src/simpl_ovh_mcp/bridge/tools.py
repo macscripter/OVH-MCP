@@ -175,6 +175,7 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         ns = namespace or _authority_namespace(p)
         values = _build_values(
             common_namespace=p.common_namespace,
+            agent_namespace=ns,
             image_tag=image_tag or settings.bridge_image_tag,
             image_registry=image_registry or settings.bridge_image_registry,
             image_repository=settings.bridge_image_repository,
@@ -263,6 +264,7 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
                 )
         values = _build_values(
             common_namespace=p.common_namespace,
+            agent_namespace=ns,
             image_tag=image_tag or settings.bridge_image_tag,
             image_registry=image_registry or settings.bridge_image_registry,
             image_repository=settings.bridge_image_repository,
@@ -799,6 +801,7 @@ def _authority_namespace(profile: Any) -> str:
 def _build_values(
     *,
     common_namespace: str,
+    agent_namespace: str = "authority01",
     image_tag: str,
     image_registry: str,
     image_repository: str,
@@ -826,7 +829,15 @@ def _build_values(
         },
         "dome": {"baseUrl": dome_base_url, "api": "TMF620", "apiVersion": "v4"},
         "cache": {"enabled": cache_enabled},
-        "redis": {"hosts": f"redis://redis.{common_namespace}.svc.cluster.local:6379"},
+        # The chart's default points at redis.<common>, which does not exist in a real
+        # Simpl-Open deployment: the common components ship no Redis, and each agent gets its
+        # own `redis-master` with a password in the `redis-secrets` Secret of its namespace.
+        # Pointed at the wrong host the cache silently never hits — every search then costs a
+        # round trip to the marketplace and `cacheHit` stays false.
+        "redis": {
+            "hosts": f"redis://redis-master.{agent_namespace}.svc.cluster.local:6379",
+            "existingSecret": {"name": "redis-secrets", "passwordKey": "redis"},
+        },
         "elk": {
             "elasticsearch": {"hosts": f"elasticsearch.{common_namespace}.svc.cluster.local:9200"},
             "metrics": {
