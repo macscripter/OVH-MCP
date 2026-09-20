@@ -364,11 +364,15 @@ TRAPS: tuple[Trap, ...] = (
         "was rendered with an empty list — a fresh profile, or one whose agents were cleared "
         "by a teardown — no agent namespace is authorised, and nothing later adds it: the "
         "agent chart assumes the platform already knows it.",
-        remedy='Re-run simpl_install_common with agents={"authorities": ["authority01"]} '
-        "and force=True, wait for the common namespace to be healthy, then let the agent "
-        "recover on its own (or reinstall it). simpl_install_common now refuses an empty "
-        "list and simpl_install_agent refuses an undeclared namespace, so this stays a "
-        "one-time trap.",
+        remedy="Re-run simpl_install_common with agents={'authorities': ['authority01']} and "
+        "force=True. That re-render adds the PostgreSQL users and re-runs the openbao-config "
+        "job, but it does NOT add the per-agent key to the already-existing common Secret "
+        "keycloak-secrets, and the job's 5-authority-secrets step then fails with \"couldn't "
+        'find key authority01 in Secret common01/keycloak-secrets". Delete that Secret with '
+        "k8s_delete(kind='Secret', name='keycloak-secrets', namespace=<common>) so the chart "
+        "recreates it with the key, wait for the job to finish, and the agent recovers on its "
+        "own. simpl_install_common now refuses an empty list and simpl_install_agent refuses "
+        "an undeclared namespace, so this stays a one-time trap.",
     ),
     Trap(
         key="hyphen-in-agent-name",
@@ -428,17 +432,18 @@ TRAPS: tuple[Trap, ...] = (
         symptom="After an ArgoCD sync of the common components application, Kafka, "
         "simpl-notification, the consumption monitoring service, Redis clients or Redpanda "
         "start failing authentication, on a platform that was healthy before the sync.",
-        cause="The common_components chart generates its Kafka, Redis, pgAdmin and Redpanda "
-        "passwords with randAlphaNum at TEMPLATE RENDER time (openbao-config, "
-        "templates/secrets.yaml and _helpers.tpl). Every sync renders the chart again and mints "
-        'new values; components already running hold the old ones. "Just re-sync it" is '
-        "therefore not a safe recovery action on this platform, and it is exactly the action the "
-        "previous trap's untested remedy recommended.",
+        cause="PARTLY UNPROVEN. The common_components templates mint Kafka, Redis, pgAdmin and "
+        "Redpanda passwords with randAlphaNum at render time, which is why a sync was "
+        "suspected of rotating them. Observed on 2026-09-20: a re-render of the deployer with "
+        "new values (agentList) changed none of the 28 Secrets in the common namespace — "
+        "ArgoCD left every existing Secret untouched, including one that should have gained "
+        "a key. So a plain re-render does not rotate; what an explicit argocd_app_sync with "
+        "force or replace does has not been measured.",
         remedy="Nothing to run — the point is what not to run. Do not argocd_app_sync the common "
-        "application on a live deployment unless you intend to restart every dependent "
-        "component afterwards and can afford the outage. Change values through the deployer "
-        "Application and let ArgoCD's own reconciliation apply them; if a sync is unavoidable, "
-        "follow it with k8s_rollout_restart of everything that consumes those Secrets.",
+        "application with force or replace on a live deployment unless you intend to restart "
+        "every dependent component afterwards and can afford the outage. Change values through "
+        "the deployer Application (simpl_install_common with force=True) and let ArgoCD's own "
+        "reconciliation apply them; that path was measured not to touch existing Secrets.",
     ),
     Trap(
         key="hpa-degraded-under-low-preset",
