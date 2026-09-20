@@ -195,7 +195,8 @@ class ArgoClient:
         return await self.call("POST", f"/api/v1/applications/{name}/sync", body)
 
     async def terminate_operation(self, name: str) -> Any:
-        return await self.call("DELETE", f"/api/v1/applications/{name}/operation")
+        # ArgoCD answers 415 to a bare DELETE here; it wants a JSON body, even an empty one.
+        return await self.call("DELETE", f"/api/v1/applications/{name}/operation", body={})
 
     async def delete(self, name: str, cascade: bool = True) -> Any:
         return await self.call(
