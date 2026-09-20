@@ -359,20 +359,22 @@ TRAPS: tuple[Trap, ...] = (
         "vault-env init logs say 'Code: 403 … namespace not authorized' against OpenBao; the "
         "initialisation job loops on 'EJBCA is not ready yet'; the postgres-operator cluster "
         "has no <agent>_* users.",
-        cause="The common components chart authorises OpenBao's Kubernetes auth and creates "
-        "PostgreSQL users ONLY for the namespaces in its agentList. When the common install "
-        "was rendered with an empty list — a fresh profile, or one whose agents were cleared "
-        "by a teardown — no agent namespace is authorised, and nothing later adds it: the "
-        "agent chart assumes the platform already knows it.",
-        remedy="Re-run simpl_install_common with agents={'authorities': ['authority01']} and "
-        "force=True. That re-render adds the PostgreSQL users and re-runs the openbao-config "
-        "job, but it does NOT add the per-agent key to the already-existing common Secret "
-        "keycloak-secrets, and the job's 5-authority-secrets step then fails with \"couldn't "
-        'find key authority01 in Secret common01/keycloak-secrets". Delete that Secret with '
-        "k8s_delete(kind='Secret', name='keycloak-secrets', namespace=<common>) so the chart "
-        "recreates it with the key, wait for the job to finish, and the agent recovers on its "
-        "own. simpl_install_common now refuses an empty list and simpl_install_agent refuses "
-        "an undeclared namespace, so this stays a one-time trap.",
+        cause="The common components chart authorises OpenBao's Kubernetes auth, creates "
+        "PostgreSQL users and mints per-agent keys in its Secrets (keycloak-secrets/<agent>, "
+        "kafka-users-secret/<agent>_usersroles, _authprovider, _onboarding, …) ONLY for the "
+        "namespaces in its agentList, and ONLY when those Secrets are first created. A common "
+        "install rendered with an empty list — a fresh profile, or one whose agents were "
+        "cleared by a teardown — therefore cannot be repaired by re-rendering: the Secrets "
+        "already exist without the keys, and the openbao-config PreSync hook that copies them "
+        "into OpenBao hangs on the first missing key (CreateContainerConfigError, 'another "
+        "operation is already in progress'). Measured on 2026-09-20: re-render plus a "
+        "generated keycloak key moved the failure to the Kafka keys.",
+        remedy="Reinstall the platform with the agent list known up front: simpl_teardown("
+        "scope='platform'), simpl_setup_rwx_storage, then simpl_install_common(agents="
+        "{'authorities': ['authority01']}), wait for the common namespace, then "
+        "simpl_install_agent. About thirty minutes, and the only path that yields a platform "
+        "nobody hand-patched. simpl_install_common now refuses an empty list and "
+        "simpl_install_agent an undeclared namespace, so this stays a one-time trap.",
     ),
     Trap(
         key="hyphen-in-agent-name",
