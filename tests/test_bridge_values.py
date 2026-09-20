@@ -115,3 +115,11 @@ def test_cache_points_at_the_agents_own_redis_with_its_secret():
     assert _looks_like_secret(v) == []
     other = _values(agent_namespace="consumer01")
     assert "consumer01" in other["redis"]["hosts"]
+
+
+def test_key_names_under_existing_secret_are_not_mistaken_for_credentials():
+    v = _values(agent_namespace="authority01", dome_secret="bridge-dome")
+    assert _looks_like_secret(v) == []
+    # a real value in the same neighbourhood is still caught
+    leaky = _values(extra_values={"redis": {"password": "hunter2"}})
+    assert any("redis.password" in x for x in _looks_like_secret(leaky))

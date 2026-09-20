@@ -939,8 +939,11 @@ def _looks_like_secret(values: dict[str, Any], path: str = "") -> list[str]:
     found: list[str] = []
     for key, value in values.items():
         here = f"{path}.{key}" if path else key
-        if here.startswith("openbao.existingSecret.keys"):
-            continue  # ENV_NAME -> secret key: names of things, by the chart's contract
+        if "existingSecret" in path.split("."):
+            # Everything under existingSecret names something — the Secret, the key inside it,
+            # the environment variable it becomes — and never holds a value, by the chart's
+            # own contract. `passwordKey: redis` is a key name, not a password.
+            continue
         if isinstance(value, dict):
             found += _looks_like_secret(value, here)
         elif (
