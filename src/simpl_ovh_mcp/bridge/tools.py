@@ -250,7 +250,10 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             )
 
         if not dry_run:
-            names = {x.get("name") for x in await kube.list("Secret", ns, limit=500)}
+            names = {
+                (x.get("metadata") or {}).get("name") or x.get("name")
+                for x in await kube.list("Secret", ns, limit=500)
+            }
             if publication and database_secret not in names:
                 raise NotFound(
                     f"Secret '{database_secret}' not found in {ns}",
