@@ -115,3 +115,25 @@ def test_agent_lists_merge_without_duplicates():
         "consumers": [],
         "providers": [],
     }
+
+
+def test_child_applications_are_found_by_destination_or_prefix():
+    from simpl_ovh_mcp.simpl.tools import _child_applications
+
+    apps = [
+        {
+            "metadata": {"name": "common01-openbao"},
+            "spec": {"destination": {"namespace": "common01"}},
+        },
+        {
+            "metadata": {"name": "common01-vswh"},
+            "spec": {"destination": {"namespace": "common01-vswh"}},
+        },
+        {
+            "metadata": {"name": "authority01-authority-iaa"},
+            "spec": {"destination": {"namespace": "authority01"}},
+        },
+        {"metadata": {"name": "other-deployer"}, "spec": {"destination": {"namespace": "other"}}},
+    ]
+    assert _child_applications(apps, ["common01"]) == ["common01-openbao", "common01-vswh"]
+    assert _child_applications(apps, ["authority01"]) == ["authority01-authority-iaa"]

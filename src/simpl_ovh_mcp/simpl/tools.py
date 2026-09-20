@@ -630,10 +630,18 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             agents=declared,
             extra_values=extra_values,
         )
+        # The chart renders per-agent Secrets INTO the agent namespaces, so they must exist
+        # before the sync or those resources fail and the sync stalls on its hook.
+        for group in declared.values():
+            for ns in group:
+                await kube.apply(
+                    {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": ns}}
+                )
         await kube.apply(manifest)
         p.chart_versions["common"] = manifest["spec"]["source"]["targetRevision"]
         p.platform["common_installed_at"] = _now()
         p.platform["agent_list"] = declared
+        openbao_note = await _nudge_child_app(kube, f"{p.common_namespace}-openbao")
         store().save(p)
         get_guard().audit("simpl_install_common", f"{p.name}/{p.common_namespace}", "applied")
         return {
@@ -642,6 +650,7 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             "namespace": p.common_namespace,
             "chart": f"{CHARTS['common'].chart} {manifest['spec']['source']['targetRevision']}",
             "agent_list": declared,
+            "openbao_application": openbao_note,
             "warnings": blockers if force else [],
             "next": "Watch it with simpl_status. The common components take 10-20 minutes and "
             "OpenBao has to initialise before anything else settles. Install agents only "
@@ -981,6 +990,22 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             except Exception as exc:  # noqa: BLE001 — teardown continues past every failure
                 skipped.append({"target": label, "reason": str(exc)[:200]})
 
+        targets_ns: list[str] = []
+        if scope in ("agents", "platform"):
+            targets_ns += list(p.agents)
+        if scope == "platform":
+            targets_ns.append(p.common_namespace)
+        if targets_ns:
+            # The deployer generates child Applications (<ns>-openbao, <ns>-vswh, the agent
+            # sub-applications) that deleting the parent does not cascade to. Left behind,
+            # they are re-adopted by the next install in whatever state they were in — the
+            # OpenBao one then never syncs and the common hook waits forever.
+            try:
+                apps = await kube.list("Application", "argocd", limit=300)
+            except Exception:  # noqa: BLE001
+                apps = []
+            for name in _child_applications(apps, targets_ns):
+                await remove("Application", name, "argocd")
         if scope in ("agents", "platform"):
             for ns in list(p.agents):
                 for app in (f"{ns}-deployer", ns):
@@ -1127,6 +1152,50 @@ def _agents_from_profile(profile: Profile) -> dict[str, list[str]]:
     for ns, kind in profile.agents.items():
         lists[AGENT_LIST_KEY.get(kind, "providers")].append(ns)
     return lists
+
+
+def _child_applications(apps: list[dict[str, Any]], namespaces: list[str]) -> list[str]:
+    """Names of ArgoCD Applications that belong to one of the namespaces being torn down:
+    destination in that namespace, or named <ns>-<something>."""
+    out: list[str] = []
+    for app in apps:
+        name = (app.get("metadata") or {}).get("name") or ""
+        dest = ((app.get("spec") or {}).get("destination") or {}).get("namespace") or ""
+        if dest in namespaces or any(name.startswith(f"{ns}-") for ns in namespaces):
+            out.append(name)
+    return sorted(set(out))
+
+
+async def _nudge_child_app(kube: Any, name: str, wait_seconds: int = 90) -> str:
+    """The deployer creates <common>-openbao as a separate Application. On a fresh cluster it
+    syncs on its own; re-adopted after a teardown it can sit OutOfSync with no operation,
+    and the common hook then waits forever for OpenBao. Ask for one sync if that is the
+    state; leave it alone otherwise."""
+    import asyncio as _asyncio
+
+    deadline = time.time() + wait_seconds
+    while True:
+        try:
+            app = await kube.get("Application", name, "argocd")
+        except Exception:  # noqa: BLE001
+            app = None
+        if app:
+            status = app.get("status") or {}
+            sync = (status.get("sync") or {}).get("status")
+            op = status.get("operationState") or {}
+            if sync == "OutOfSync" and op.get("phase") not in ("Running",):
+                await kube.patch(
+                    "Application",
+                    name,
+                    {"operation": {"initiatedBy": {"username": "simpl-ovh-mcp"}, "sync": {}}},
+                    "argocd",
+                    "merge",
+                )
+                return f"{name} was OutOfSync with no operation; a sync was requested"
+            return f"{name}: sync={sync}, left alone"
+        if time.time() > deadline:
+            return f"{name} did not appear within {wait_seconds}s; check argocd_apps"
+        await _asyncio.sleep(10)
 
 
 def _merge_agent_lists(
