@@ -44,12 +44,7 @@ NORTHBOUND_BASE = "/bridge/v1"
 DATABASE_SECRET = "bridge-database"
 DOME_SECRET = "bridge-dome"
 PG_CLUSTER = "pg-cluster"
-SAMPLE_SD = (
-    Path(__file__).resolve().parents[3]
-    / "vendor"
-    / "bridge-samples"
-    / "governance-authority-ai-service-sample.json"
-)
+SAMPLE_SD_NAME = "governance-authority-ai-service-sample.json"
 
 # What the Bridge needs from the platform, from the deployment notes of 18 September 2026.
 PLATFORM_NEEDS = [
@@ -640,9 +635,14 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         p = get_store().resolve(profile)
         ns = namespace or (p.bridge or {}).get("namespace") or _authority_namespace(p)
         kube = await get_kube(p.name)
-        if not SAMPLE_SD.exists():
-            raise ConfigError(f"sample self-description missing at {SAMPLE_SD}")
-        sd = json.loads(SAMPLE_SD.read_text(encoding="utf-8"))
+        sample = _sample_sd_path(settings)
+        if sample is None:
+            raise ConfigError(
+                f"no {SAMPLE_SD_NAME} next to the vendored chart",
+                "Vendor it with scripts/sync-bridge-chart.sh, or pass a self-description of "
+                "your own once bridge_publish accepts one.",
+            )
+        sd = json.loads(sample.read_text(encoding="utf-8"))
         asset = asset_id or f"simpl-ovh-mcp-{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}"
         body = {"assetId": asset, "selfDescription": sd, "requestedBy": "simpl-ovh-mcp"}
         status, text = await kube.service_proxy(
@@ -763,6 +763,28 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
 
 
 # ---------------------------------------------------------------------------- helpers --
+def _sample_sd_path(settings: Settings) -> Path | None:
+    """Where the sample self-description lives, in a checkout and in the image alike.
+
+    The chart is vendored at <root>/vendor/charts/bridge and the samples beside it at
+    <root>/vendor/bridge-samples; <root> is the repository locally and /app in the image,
+    so derive it from the chart path rather than from this file's position, which differs
+    between an editable install and a site-packages one.
+    """
+    candidates: list[Path] = []
+    chart = settings.bridge_chart_path
+    if chart:
+        candidates.append(Path(chart).resolve().parents[1] / "bridge-samples" / SAMPLE_SD_NAME)
+    candidates.append(
+        Path(__file__).resolve().parents[3] / "vendor" / "bridge-samples" / SAMPLE_SD_NAME
+    )
+    candidates.append(Path("/app/vendor/bridge-samples") / SAMPLE_SD_NAME)
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
+
 def _authority_namespace(profile: Any) -> str:
     for ns, kind in (profile.agents or {}).items():
         if kind == "authority":

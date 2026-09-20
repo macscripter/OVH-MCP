@@ -89,3 +89,20 @@ def test_dome_secret_manifest():
 def test_credential_check_still_catches_literal_values():
     v = _values(extra_values={"dome": {"auth": {"staticToken": "eyJ..."}}})
     assert any("staticToken" in x for x in _looks_like_secret(v))
+
+
+def test_sample_sd_is_found_next_to_the_vendored_chart(tmp_path):
+    from simpl_ovh_mcp.bridge.tools import SAMPLE_SD_NAME, _sample_sd_path
+    from simpl_ovh_mcp.settings import Settings
+
+    root = tmp_path / "app"
+    (root / "vendor" / "charts" / "bridge").mkdir(parents=True)
+    samples = root / "vendor" / "bridge-samples"
+    samples.mkdir(parents=True)
+    (samples / SAMPLE_SD_NAME).write_text("{}", encoding="utf-8")
+    settings = Settings(bridge_chart_path=str(root / "vendor" / "charts" / "bridge"))
+    assert _sample_sd_path(settings) == samples / SAMPLE_SD_NAME
+
+    missing = Settings(bridge_chart_path=str(tmp_path / "nowhere" / "charts" / "bridge"))
+    found = _sample_sd_path(missing)
+    assert found is None or found.exists()
