@@ -367,6 +367,59 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         return {"applied": results}
 
     @tk.write
+    async def k8s_secret_generate_key(
+        namespace: str,
+        name: str,
+        key: str,
+        length: int = 32,
+        overwrite: bool = False,
+        profile: str | None = None,
+    ) -> dict[str, Any]:
+        """Put a freshly generated random value under `key` in a Secret, creating the Secret if needed.
+
+        For the Simpl-Open case where a chart expects a per-agent key in a Secret it only
+        populates at creation time (keycloak-secrets/<agent>). The value is generated on the
+        server, written straight into the cluster, and never returned or logged. Existing
+        keys are kept; an existing value under `key` is kept too unless `overwrite=True`.
+        """
+        import base64 as _b64
+        import secrets as _secrets
+        import string as _string
+
+        kube = await get_kube(profile)
+        try:
+            existing = await kube.get("Secret", name, namespace)
+        except SimplMcpError:
+            existing = None
+        data = dict((existing or {}).get("data") or {})
+        if key in data and not overwrite:
+            action = "kept"
+        else:
+            alphabet = _string.ascii_letters + _string.digits
+            value = "".join(_secrets.choice(alphabet) for _ in range(max(8, length)))
+            data[key] = _b64.b64encode(value.encode("utf-8")).decode("ascii")
+            action = "generated"
+        manifest = {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {"name": name, "namespace": namespace},
+            "type": (existing or {}).get("type") or "Opaque",
+            "data": data,
+        }
+        applied = await kube.apply(manifest)
+        get_guard().audit("k8s_secret_generate_key", f"{namespace}/{name}/{key}", action)
+        return {
+            "namespace": namespace,
+            "name": name,
+            "key": key,
+            "action": action,
+            "created": existing is None,
+            "keys": sorted(data.keys()),
+            "resource_version": (applied.get("metadata") or {}).get("resourceVersion"),
+            "note": "The value was generated on the server and is not returned.",
+        }
+
+    @tk.write
     async def k8s_namespace_create(name: str, profile: str | None = None) -> dict[str, Any]:
         """Create a namespace if it does not exist.
 
