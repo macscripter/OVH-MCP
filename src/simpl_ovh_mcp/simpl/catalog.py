@@ -377,6 +377,20 @@ TRAPS: tuple[Trap, ...] = (
         "simpl_install_agent an undeclared namespace, so this stays a one-time trap.",
     ),
     Trap(
+        key="teardown-namespace-stuck",
+        symptom="After simpl_teardown the common or agent namespace stays Terminating for "
+        "ten minutes or more; a reinstall then fails with 'unable to create new content in "
+        "namespace … because it is being terminated'.",
+        cause="The namespace deletion removes the operators together with their custom "
+        "resources, but the resources carry finalizers (Confluent's kafka and "
+        "kraftcontroller, the postgres-operator's postgresql, a finished job) that only the "
+        "dead operator would have cleared. Kubernetes waits for a cleanup that can never run.",
+        remedy="List what is left with k8s_list per kind (kafka, kraftcontroller, postgresql, "
+        "job) in the namespace and clear each with k8s_finalizers_remove; the namespace "
+        "disappears within seconds. Then re-run simpl_setup_rwx_storage before the common "
+        "install, because the OpenBao claim lived in the deleted namespace.",
+    ),
+    Trap(
         key="hyphen-in-agent-name",
         symptom="Hostnames come out malformed and the agent's ingresses never match.",
         cause="Agent names become part of an FQDN. A '-' in the name breaks it. The deployment "

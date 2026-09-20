@@ -420,6 +420,30 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         }
 
     @tk.write
+    async def k8s_finalizers_remove(
+        kind: str, name: str, namespace: str | None = None, profile: str | None = None
+    ) -> dict[str, Any]:
+        """Clear the finalizers of one object so a deletion that is stuck can complete.
+
+        The Simpl-Open case: a platform teardown deletes the namespace, the Confluent and
+        postgres operators die with it, and their custom resources (kafka, kraftcontroller,
+        postgresql) keep finalizers nobody will ever process — the namespace then sits in
+        Terminating for good. Only use it on objects whose controller is gone; clearing a
+        finalizer skips the cleanup that controller would have done.
+        """
+        kube = await get_kube(profile)
+        before = await kube.get(kind, name, namespace)
+        finalizers = list((before.get("metadata") or {}).get("finalizers") or [])
+        if finalizers:
+            await kube.patch(kind, name, {"metadata": {"finalizers": []}}, namespace, "merge")
+        get_guard().audit(
+            "k8s_finalizers_remove",
+            f"{namespace or ''}/{kind}/{name}",
+            ",".join(finalizers) or "none",
+        )
+        return {"kind": kind, "name": name, "namespace": namespace, "removed": finalizers}
+
+    @tk.write
     async def k8s_namespace_create(name: str, profile: str | None = None) -> dict[str, Any]:
         """Create a namespace if it does not exist.
 
