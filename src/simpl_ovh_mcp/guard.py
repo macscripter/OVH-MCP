@@ -100,7 +100,9 @@ class Guard:
                 del self._pending[token]
 
     # --- audit ------------------------------------------------------------------------
-    def audit(self, tool: str, target: str, outcome: str, detail: dict[str, Any] | None = None) -> None:
+    def audit(
+        self, tool: str, target: str, outcome: str, detail: dict[str, Any] | None = None
+    ) -> None:
         record = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "tool": tool,

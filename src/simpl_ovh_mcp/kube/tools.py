@@ -206,10 +206,14 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         context, so a long log can be searched without pulling it all into the answer.
         """
         kube = await get_kube(profile)
-        pods = [pod] if pod else [
-            p["metadata"]["name"]
-            for p in await kube.list("Pod", namespace, label_selector, limit=5)
-        ]
+        pods = (
+            [pod]
+            if pod
+            else [
+                p["metadata"]["name"]
+                for p in await kube.list("Pod", namespace, label_selector, limit=5)
+            ]
+        )
         if not pods:
             raise NotFound(
                 f"no pods matched in {namespace}",
@@ -392,11 +396,7 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             name,
             {
                 "spec": {
-                    "template": {
-                        "metadata": {
-                            "annotations": {"simpl-ovh-mcp/restartedAt": stamp}
-                        }
-                    }
+                    "template": {"metadata": {"annotations": {"simpl-ovh-mcp/restartedAt": stamp}}}
                 }
             },
             namespace,
@@ -556,7 +556,15 @@ def _cpu_cores(value: str) -> float:
 
 def _mem_gib(value: str) -> float:
     value = str(value)
-    units = {"Ki": 1 / 1024 / 1024, "Mi": 1 / 1024, "Gi": 1.0, "Ti": 1024.0, "K": 1e-6, "M": 1e-3, "G": 1.0}
+    units = {
+        "Ki": 1 / 1024 / 1024,
+        "Mi": 1 / 1024,
+        "Gi": 1.0,
+        "Ti": 1024.0,
+        "K": 1e-6,
+        "M": 1e-3,
+        "G": 1.0,
+    }
     for suffix, factor in units.items():
         if value.endswith(suffix):
             try:
@@ -572,8 +580,17 @@ def _mem_gib(value: str) -> float:
 # Provisioners known to serve ReadWriteMany. Anything else is reported as not RWX-capable,
 # which is the safe direction to be wrong in: the check exists to catch a stalled install.
 RWX_PROVISIONERS = (
-    "nfs", "cluster.local/nfs", "csi-driver-nfs", "nfs.csi.k8s.io", "cephfs",
-    "manila", "efs", "azurefile", "longhorn", "glusterfs", "quobyte",
+    "nfs",
+    "cluster.local/nfs",
+    "csi-driver-nfs",
+    "nfs.csi.k8s.io",
+    "cephfs",
+    "manila",
+    "efs",
+    "azurefile",
+    "longhorn",
+    "glusterfs",
+    "quobyte",
 )
 
 

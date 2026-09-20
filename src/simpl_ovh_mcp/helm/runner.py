@@ -131,7 +131,9 @@ class HelmRunner:
 
     # --- operations --------------------------------------------------------------------
     async def repo_add(self, name: str, url: str) -> HelmResult:
-        return (await self.run("repo", "add", name, url, "--force-update", timeout=120)).raise_for_status()
+        return (
+            await self.run("repo", "add", name, url, "--force-update", timeout=120)
+        ).raise_for_status()
 
     async def repo_update(self) -> HelmResult:
         return (await self.run("repo", "update", timeout=180)).raise_for_status()
@@ -148,7 +150,9 @@ class HelmRunner:
         import json
 
         result = (
-            await self.run("status", release, "--namespace", namespace, "--output", "json", timeout=120)
+            await self.run(
+                "status", release, "--namespace", namespace, "--output", "json", timeout=120
+            )
         ).raise_for_status()
         return json.loads(result.stdout or "{}")
 

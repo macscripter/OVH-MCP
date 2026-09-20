@@ -57,19 +57,19 @@ class UpstreamError(SimplMcpError):
 # that the OVH, Kubernetes and ArgoCD clients all explain themselves the same way.
 OVH_HINTS = {
     401: "The credentials are refused. Check OVH_APPLICATION_KEY/SECRET/CONSUMER_KEY (or "
-         "OVH_CLIENT_ID/SECRET) and that the endpoint matches the account region.",
+    "OVH_CLIENT_ID/SECRET) and that the endpoint matches the account region.",
     403: "Authenticated but not entitled. The consumer key or service account needs rights on "
-         "this path — most often GET/POST/PUT/DELETE on /cloud/project/* and /domain/zone/*.",
+    "this path — most often GET/POST/PUT/DELETE on /cloud/project/* and /domain/zone/*.",
     404: "No such resource. Check the cloud project id (OVH_CLOUD_PROJECT) and the cluster id.",
     409: "The resource is busy — usually another operation is still running on the cluster. "
-         "Poll ovh_kube_get until status is READY.",
+    "Poll ovh_kube_get until status is READY.",
     429: "Rate limited by the OVH API. Wait a few seconds and retry.",
 }
 
 KUBE_HINTS = {
     401: "The kubeconfig is rejected. Fetch a fresh one with ovh_kubeconfig_fetch; OVH rotates "
-         "the admin certificate when the cluster is reset.",
+    "the admin certificate when the cluster is reset.",
     403: "The kubeconfig's identity lacks RBAC rights for this resource.",
     404: "No such object, or the API group is not installed in this cluster (a CRD like "
-         "argoproj.io/Application only exists once ArgoCD is installed).",
+    "argoproj.io/Application only exists once ArgoCD is installed).",
 }

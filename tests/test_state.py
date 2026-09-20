@@ -17,7 +17,9 @@ def test_a_profile_round_trips(tmp_path):
 
 def test_hostnames_follow_component_namespace_suffix(tmp_path):
     profile = Profile(name="p", domain_suffix="simpl.example.eu")
-    assert profile.fqdn("authority.fe", "authority01") == "authority.fe.authority01.simpl.example.eu"
+    assert (
+        profile.fqdn("authority.fe", "authority01") == "authority.fe.authority01.simpl.example.eu"
+    )
 
 
 def test_a_profile_without_a_domain_explains_itself():

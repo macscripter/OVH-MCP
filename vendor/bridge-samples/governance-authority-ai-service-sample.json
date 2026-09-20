@@ -1,0 +1,151 @@
+{
+  "@context": [
+    "https://www.w3.org/2018/credentials/v1",
+    "https://w3id.org/security/suites/jws-2020/v1",
+    {
+      "simpl": "http://w3id.org/gaia-x/simpl#",
+      "dcterms": "http://purl.org/dc/terms/",
+      "schema": "https://schema.org/",
+      "dcat": "http://www.w3.org/ns/dcat#",
+      "xsd": "http://www.w3.org/2001/XMLSchema#"
+    }
+  ],
+  "type": ["VerifiablePresentation"],
+  "verifiableCredential": [
+    {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "https://w3id.org/security/suites/jws-2020/v1",
+        {
+          "simpl": "http://w3id.org/gaia-x/simpl#",
+          "dcterms": "http://purl.org/dc/terms/",
+          "schema": "https://schema.org/",
+          "dcat": "http://www.w3.org/ns/dcat#",
+          "xsd": "http://www.w3.org/2001/XMLSchema#"
+        }
+      ],
+      "type": ["VerifiableCredential"],
+      "id": "https://catalogue.authority.simpl.example.eu/self-descriptions/urn:uuid:5b7e2d4c-8a13-4f0e-9c21-3d6f8a1b2c4e",
+      "issuer": "did:web:authority.simpl.example.eu",
+      "issuanceDate": "2026-09-15T09:00:00Z",
+      "credentialSubject": {
+        "id": "urn:uuid:5b7e2d4c-8a13-4f0e-9c21-3d6f8a1b2c4e",
+        "type": "simpl:GovernanceAuthorityAIService",
+        "simpl:generalServiceProperties": {
+          "type": "simpl:GeneralServiceProperties",
+          "simpl:name": "Clinical Text De-identification Service",
+          "simpl:description": "Governance Authority AI Service that detects and masks patient identifiers, dates and locations in clinical free text. Offered to every onboarded participant of the health data space under the conditions set by the Governance Authority.",
+          "simpl:serviceAccessPoint": "https://ai.authority.simpl.example.eu/deid/v1",
+          "simpl:keywords": ["NLP", "de-identification", "healthcare", "GDPR", "GenAI"],
+          "simpl:inLanguage": "en",
+          "simpl:offeringType": "governance-authority-ai-service",
+          "simpl:sharingMethodId": "sm-rest-api-01",
+          "dcterms:identifier": "urn:uuid:5b7e2d4c-8a13-4f0e-9c21-3d6f8a1b2c4e",
+          "schema:version": "1.0"
+        },
+        "simpl:assetProperties": {
+          "type": "simpl:AssetProperties"
+        },
+        "simpl:providerInformation": {
+          "type": "simpl:ProviderInformation",
+          "simpl:providedBy": "urn:simpl:participant:governance-authority:health-dataspace",
+          "simpl:contact": "ai-services@authority.simpl.example.eu",
+          "simpl:signature": "MEUCIQDx7f3a2b9c0e1d4f6a8b7c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7a8b9"
+        },
+        "simpl:aiServiceProperties": {
+          "type": "simpl:AIServiceProperties",
+          "simpl:purpose": "Removes personal identifiers from clinical documents so that participants can share them for research under GDPR.",
+          "simpl:aiServiceCategory": "GenAI and LLM",
+          "simpl:model": "Mistral-7B-Instruct-v0.3",
+          "simpl:modelFamily": "Mistral",
+          "simpl:eligibleInputData": [
+            "Clinical discharge letters (text/plain, en, de, fr)",
+            "Radiology reports (text/plain, en)"
+          ],
+          "simpl:expectedOutput": [
+            "The same text with identifiers replaced by typed placeholders",
+            "A JSON list of the detected entities with offsets and types"
+          ],
+          "simpl:accessConditions": "Onboarded participants with the CONSUMER or PROVIDER role; usage is logged per participant; documents are not retained after processing.",
+          "simpl:pricingModel": "pay-per-use",
+          "simpl:availabilityStatus": "available",
+          "simpl:lifecycleState": "active",
+          "simpl:provisioningProfile": [
+            "governance-authority-infrastructure",
+            "ai-factory-infrastructure"
+          ],
+          "simpl:domePublicationEligible": true
+        },
+        "simpl:offeringPrice": {
+          "type": "simpl:OfferingPrice",
+          "simpl:license": ["https://www.apache.org/licenses/LICENSE-2.0"],
+          "simpl:currency": "EUR",
+          "simpl:price": 0.05,
+          "simpl:priceType": "commercial"
+        },
+        "simpl:servicePolicy": {
+          "type": "simpl:ServicePolicy",
+          "simpl:access-policy": [
+            "{\"@type\":\"odrl:Set\",\"odrl:permission\":[{\"odrl:action\":\"odrl:use\",\"odrl:constraint\":[{\"odrl:leftOperand\":\"simpl:participantRole\",\"odrl:operator\":\"odrl:isAnyOf\",\"odrl:rightOperand\":[\"CONSUMER\",\"PROVIDER\"]}]}]}"
+          ],
+          "simpl:usage-policy": [
+            "{\"@type\":\"odrl:Set\",\"odrl:permission\":[{\"odrl:action\":\"odrl:use\",\"odrl:constraint\":[{\"odrl:leftOperand\":\"odrl:purpose\",\"odrl:operator\":\"odrl:eq\",\"odrl:rightOperand\":\"clinical-research\"}]}]}"
+          ],
+          "simpl:dataProtectionRegime": ["GDPR2016"]
+        },
+        "simpl:contractTemplate": {
+          "type": "simpl:ContractTemplate",
+          "simpl:contractTemplateDocument": "Contract Template 1",
+          "simpl:contractTemplateHashValue": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+          "simpl:contractTemplateHashAlg": "SHA-256",
+          "simpl:contractTemplateURL": "https://contracts.authority.simpl.example.eu/templates/ai-1"
+        },
+        "simpl:contractClauses": {
+          "type": "simpl:ContractClauses",
+          "simpl:slaAgreements": {
+            "dcterms:title": "Standard AI Service SLA",
+            "simpl:slaAgreementsEntry": [
+              {"dcterms:type": "availability", "simpl:target": "99.5", "simpl:operator": "gte", "simpl:unit": "percent"}
+            ]
+          },
+          "simpl:licenseAgreement": {
+            "dcterms:title": "Apache License 2.0",
+            "dcterms:source": "https://www.apache.org/licenses/LICENSE-2.0"
+          },
+          "simpl:billingSchema": {
+            "dcterms:title": "Pay per document",
+            "simpl:billingModel": "pay-as-you-go",
+            "simpl:billingModelDetails": "0.05 EUR per processed document",
+            "simpl:billingSchedule": "Monthly - First day of the month",
+            "simpl:billingTrigger": "01/MM/YYYY"
+          }
+        },
+        "simpl:edcRegistration": {
+          "type": "simpl:EdcRegistration",
+          "simpl:contractDefinitionId": "cd-ai-5b7e2d4c",
+          "simpl:servicePolicyId": "sp-ai-3c4d5e6f",
+          "simpl:accessPolicyId": "ap-ai-1a2b3c4d",
+          "simpl:assetId": "asset-ai-5b7e2d4c"
+        },
+        "simpl:edcConnector": {
+          "type": "simpl:EdcConnector",
+          "simpl:providerEndpointURL": "https://edc.authority.simpl.example.eu/api/dsp"
+        }
+      },
+      "proof": {
+        "type": "JsonWebSignature2020",
+        "created": "2026-09-15T09:00:05Z",
+        "proofPurpose": "assertionMethod",
+        "verificationMethod": "did:web:authority.simpl.example.eu#JWK2020-RSA",
+        "jws": "eyJhbGciOiJQUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..fixture-signature-not-verifiable"
+      }
+    }
+  ],
+  "proof": {
+    "type": "JsonWebSignature2020",
+    "created": "2026-09-15T09:01:00Z",
+    "proofPurpose": "authentication",
+    "verificationMethod": "did:web:authority.simpl.example.eu#JWK2020-RSA",
+    "jws": "eyJhbGciOiJQUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..fixture-presentation-signature"
+  }
+}

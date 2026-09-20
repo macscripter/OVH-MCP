@@ -91,7 +91,9 @@ def load_kubeconfig(profile: Profile | None = None, context: str | None = None) 
     source = ""
 
     if profile is not None:
-        path = Path(profile.platform.get("kubeconfig_path") or get_store().kubeconfig_path(profile.name))
+        path = Path(
+            profile.platform.get("kubeconfig_path") or get_store().kubeconfig_path(profile.name)
+        )
         if path.exists():
             raw = path.read_text(encoding="utf-8")
             source = f"profile '{profile.name}' ({path})"
@@ -118,7 +120,11 @@ def load_kubeconfig(profile: Profile | None = None, context: str | None = None) 
             "SIMPL_MCP_KUBECONFIG (path) / SIMPL_MCP_KUBECONFIG_B64 (base64 of the file).",
         )
 
-    return parse_kubeconfig(raw, context=context or (profile.platform.get("kube_context") if profile else None), source=source)
+    return parse_kubeconfig(
+        raw,
+        context=context or (profile.platform.get("kube_context") if profile else None),
+        source=source,
+    )
 
 
 def parse_kubeconfig(raw: str, context: str | None = None, source: str = "inline") -> KubeTarget:
@@ -141,7 +147,9 @@ def parse_kubeconfig(raw: str, context: str | None = None, source: str = "inline
     clusters = {c["name"]: c.get("cluster", {}) for c in doc.get("clusters", [])}
     users = {u["name"]: u.get("user", {}) for u in doc.get("users", [])}
 
-    cluster = clusters.get(ctx.get("cluster")) or (next(iter(clusters.values())) if clusters else {})
+    cluster = clusters.get(ctx.get("cluster")) or (
+        next(iter(clusters.values())) if clusters else {}
+    )
     user = users.get(ctx.get("user")) or (next(iter(users.values())) if users else {})
 
     server = cluster.get("server")
@@ -156,8 +164,15 @@ def parse_kubeconfig(raw: str, context: str | None = None, source: str = "inline
         )
 
     workdir = Path(get_settings().state_dir) / ".certs"
-    ca_path = _materialise(cluster.get("certificate-authority-data"), cluster.get("certificate-authority"), workdir, "ca")
-    cert_path = _materialise(user.get("client-certificate-data"), user.get("client-certificate"), workdir, "cert")
+    ca_path = _materialise(
+        cluster.get("certificate-authority-data"),
+        cluster.get("certificate-authority"),
+        workdir,
+        "ca",
+    )
+    cert_path = _materialise(
+        user.get("client-certificate-data"), user.get("client-certificate"), workdir, "cert"
+    )
     key_path = _materialise(user.get("client-key-data"), user.get("client-key"), workdir, "key")
 
     return KubeTarget(
@@ -172,7 +187,9 @@ def parse_kubeconfig(raw: str, context: str | None = None, source: str = "inline
     )
 
 
-def _materialise(b64_data: str | None, path_value: str | None, workdir: Path, kind: str) -> str | None:
+def _materialise(
+    b64_data: str | None, path_value: str | None, workdir: Path, kind: str
+) -> str | None:
     """Write embedded PEM data to a private file; pass through a path that already exists."""
     if path_value:
         p = Path(path_value).expanduser()

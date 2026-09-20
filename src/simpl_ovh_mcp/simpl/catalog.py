@@ -314,7 +314,7 @@ TRAPS: tuple[Trap, ...] = (
     Trap(
         key="rwx-openbao",
         symptom="simpl-notification and other pods crash-loop on "
-        "\"can't open /vault/secrets/config.txt\"; the init-bao-<namespace>-pvc claim stays "
+        '"can\'t open /vault/secrets/config.txt"; the init-bao-<namespace>-pvc claim stays '
         "Pending.",
         cause="The OpenBao initialiser claims a ReadWriteMany volume. The hardware table says "
         "ReadWriteOnce is enough, which is wrong. OVH's default Cinder class and k3s local-path "
@@ -371,7 +371,7 @@ TRAPS: tuple[Trap, ...] = (
     ),
     Trap(
         key="bridge-needs-a-datasource",
-        symptom="The Bridge crash-loops on start-up with \"Unable to find datasource "
+        symptom='The Bridge crash-loops on start-up with "Unable to find datasource '
         "'<default>'\", or with an InactiveBeanException naming org.hibernate.Session and "
         "eu.europa.ec.simpl.bridge.outbox.OutboxRepository.",
         cause="Before GitLab main 9cbda97 the application required a datasource at boot even "
@@ -391,7 +391,7 @@ TRAPS: tuple[Trap, ...] = (
         symptom="After a cluster restart — a scale to zero and back, most obviously — Keycloak, "
         "identity-provider, authentication-provider, users-roles, security-attributes-provider "
         "and xsfc-service all crash-loop with "
-        "\"FATAL: password authentication failed for user <agent>_<component>\", and the "
+        '"FATAL: password authentication failed for user <agent>_<component>", and the '
         "tier2 components stay Pending behind them.",
         cause="NOT ESTABLISHED. The PostgreSQL passwords have two holders — the postgres-"
         "operator's own Secrets, and a copy that openbao-config writes into OpenBao once at "
@@ -414,7 +414,7 @@ TRAPS: tuple[Trap, ...] = (
         cause="The common_components chart generates its Kafka, Redis, pgAdmin and Redpanda "
         "passwords with randAlphaNum at TEMPLATE RENDER time (openbao-config, "
         "templates/secrets.yaml and _helpers.tpl). Every sync renders the chart again and mints "
-        "new values; components already running hold the old ones. \"Just re-sync it\" is "
+        'new values; components already running hold the old ones. "Just re-sync it" is '
         "therefore not a safe recovery action on this platform, and it is exactly the action the "
         "previous trap's untested remedy recommended.",
         remedy="Nothing to run — the point is what not to run. Do not argocd_app_sync the common "
@@ -427,7 +427,7 @@ TRAPS: tuple[Trap, ...] = (
         key="hpa-degraded-under-low-preset",
         symptom="An agent's ArgoCD application stays Degraded while every pod is Running and "
         "Ready. The degraded resources are all HorizontalPodAutoscalers reporting "
-        "\"failed to get cpu utilization: no metrics returned matched known pods\".",
+        '"failed to get cpu utilization: no metrics returned matched known pods".',
         cause="resourcePreset: low sets CPU and memory requests to 0. A utilization-based "
         "HPA computes a percentage OF the request, so a request of zero leaves it nothing to "
         "divide by. The charts also set those autoscalers to minReplicas 1 and maxReplicas 1, "
@@ -440,7 +440,7 @@ TRAPS: tuple[Trap, ...] = (
     ),
     Trap(
         key="staging-acme-breaks-trust",
-        symptom="openbao-config fails with \"x509: certificate signed by unknown authority\" "
+        symptom='openbao-config fails with "x509: certificate signed by unknown authority" '
         "and every component waiting on injected secrets stays Pending.",
         cause="Simpl-Open's components call each other over their public ingress hostnames and "
         "VERIFY the certificate against the system trust store. Let's Encrypt staging is not in "

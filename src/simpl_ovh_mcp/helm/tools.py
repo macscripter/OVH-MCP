@@ -37,7 +37,9 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         }
 
     @tk.read
-    async def helm_status(release: str, namespace: str, profile: str | None = None) -> dict[str, Any]:
+    async def helm_status(
+        release: str, namespace: str, profile: str | None = None
+    ) -> dict[str, Any]:
         """A release's status, revision, chart version and the notes the chart printed.
 
         The notes are where a platform chart tells you what it created — ingress-nginx
@@ -59,7 +61,9 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         }
 
     @tk.read
-    async def helm_values(release: str, namespace: str, profile: str | None = None) -> dict[str, Any]:
+    async def helm_values(
+        release: str, namespace: str, profile: str | None = None
+    ) -> dict[str, Any]:
         """The user-supplied values of a release, with credential-shaped keys redacted."""
         helm = await runner_for(profile)
         values = await helm.get_values(release, namespace)

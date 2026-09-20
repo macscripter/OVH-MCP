@@ -29,7 +29,9 @@ async def test_signature_matches_the_documented_formula(monkeypatch):
     url = "https://eu.api.ovh.com/1.0/cloud/project"
     headers = await client._headers("GET", url, "")
 
-    expected = hashlib.sha1("+".join(["AS", "CK", "GET", url, "", "1700000000"]).encode()).hexdigest()
+    expected = hashlib.sha1(
+        "+".join(["AS", "CK", "GET", url, "", "1700000000"]).encode()
+    ).hexdigest()
     assert headers["X-Ovh-Signature"] == f"$1${expected}"
     assert headers["X-Ovh-Application"] == "AK"
     assert headers["X-Ovh-Consumer"] == "CK"
@@ -100,7 +102,13 @@ def test_pull_secret_manifest_is_a_valid_dockerconfigjson():
 
     from simpl_ovh_mcp.ovh.tools import _pull_secret_manifest
 
-    m = _pull_secret_manifest("ovh-registry-pull", "authority01", "abc.c1.gra.container-registry.ovh.net", "simpl-pull", "s3cr3t")
+    m = _pull_secret_manifest(
+        "ovh-registry-pull",
+        "authority01",
+        "abc.c1.gra.container-registry.ovh.net",
+        "simpl-pull",
+        "s3cr3t",
+    )
     assert m["type"] == "kubernetes.io/dockerconfigjson"
     assert m["metadata"] == {
         "name": "ovh-registry-pull",

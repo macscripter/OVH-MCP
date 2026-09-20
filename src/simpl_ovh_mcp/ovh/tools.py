@@ -403,9 +403,7 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         p.ovh_project = service
         p.kube_id = kid
         p.platform["kubeconfig_path"] = str(path)
-        p.platform["kubeconfig_fetched_at"] = time.strftime(
-            "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
-        )
+        p.platform["kubeconfig_fetched_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         store().save(p)
         guard().audit("ovh_kubeconfig_fetch", f"{service}/{kid}", "stored", {"path": str(path)})
 
@@ -473,9 +471,7 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         g = guard()
         g.require_destructive("ovh_nodepool_delete")
         if not confirm:
-            pool = await client.get(
-                f"/cloud/project/{service}/kube/{kid}/nodepool/{nodepool_id}"
-            )
+            pool = await client.get(f"/cloud/project/{service}/kube/{kid}/nodepool/{nodepool_id}")
             impact = (
                 f"Deletes node pool '{pool.get('name')}' with {pool.get('currentNodes')} nodes "
                 f"from cluster {kid}."
@@ -766,9 +762,7 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             raise UpstreamError("OVH API", None, "the registry user was created without a password")
 
         kube = await get_kube(profile)
-        await kube.apply(
-            {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}}
-        )
+        await kube.apply({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}})
         await kube.apply(_pull_secret_manifest(secret_name, namespace, host, username, password))
         guard().audit(
             "ovh_registry_user_create",
@@ -787,7 +781,10 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             "pull_secret": f"{namespace}/{secret_name}",
             "note": "The password went into the Secret and nowhere else. To push from a "
             "machine, create a second user for that machine rather than reusing this one.",
-            "image_values": {"image": {"registry": host}, "imagePullSecrets": [{"name": secret_name}]},
+            "image_values": {
+                "image": {"registry": host},
+                "imagePullSecrets": [{"name": secret_name}],
+            },
         }
 
     @tk.destructive
@@ -914,12 +911,31 @@ def _pool_summary(p: dict[str, Any]) -> dict[str, Any]:
 # Only the families Simpl-Open is plausibly deployed on; anything unknown is reported as
 # unknown rather than guessed.
 FLAVOR_SIZES: dict[str, tuple[int, int]] = {
-    "b2-7": (2, 7), "b2-15": (4, 15), "b2-30": (8, 30), "b2-60": (16, 60), "b2-120": (32, 120),
-    "b3-8": (2, 8), "b3-16": (4, 16), "b3-32": (8, 32), "b3-64": (16, 64), "b3-128": (32, 128),
+    "b2-7": (2, 7),
+    "b2-15": (4, 15),
+    "b2-30": (8, 30),
+    "b2-60": (16, 60),
+    "b2-120": (32, 120),
+    "b3-8": (2, 8),
+    "b3-16": (4, 16),
+    "b3-32": (8, 32),
+    "b3-64": (16, 64),
+    "b3-128": (32, 128),
     "b3-256": (64, 256),
-    "c3-4": (2, 4), "c3-8": (4, 8), "c3-16": (8, 16), "c3-32": (16, 32), "c3-64": (32, 64),
-    "d2-4": (1, 4), "d2-8": (2, 8), "r2-15": (2, 15), "r2-30": (2, 30), "r2-60": (4, 60),
-    "r3-16": (2, 16), "r3-32": (4, 32), "r3-64": (8, 64), "r3-128": (16, 128),
+    "c3-4": (2, 4),
+    "c3-8": (4, 8),
+    "c3-16": (8, 16),
+    "c3-32": (16, 32),
+    "c3-64": (32, 64),
+    "d2-4": (1, 4),
+    "d2-8": (2, 8),
+    "r2-15": (2, 15),
+    "r2-30": (2, 30),
+    "r2-60": (4, 60),
+    "r3-16": (2, 16),
+    "r3-32": (4, 32),
+    "r3-64": (8, 64),
+    "r3-128": (16, 128),
 }
 
 
@@ -946,6 +962,7 @@ def _kubeconfig_server(content: str) -> str | None:
         if line.startswith("server:"):
             return line.split("server:", 1)[1].strip()
     return None
+
 
 def _registry_summary(r: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -982,7 +999,5 @@ def _pull_secret_manifest(
             "namespace": namespace,
             "annotations": {"simpl-ovh-mcp/registry": host},
         },
-        "data": {
-            ".dockerconfigjson": base64.b64encode(_json.dumps(config).encode()).decode()
-        },
+        "data": {".dockerconfigjson": base64.b64encode(_json.dumps(config).encode()).decode()},
     }

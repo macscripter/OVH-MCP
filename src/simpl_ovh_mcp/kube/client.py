@@ -304,9 +304,7 @@ class KubeClient:
     async def events(
         self, namespace: str | None = None, field_selector: str | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
-        path = (
-            f"/api/v1/namespaces/{namespace}/events" if namespace else "/api/v1/events"
-        )
+        path = f"/api/v1/namespaces/{namespace}/events" if namespace else "/api/v1/events"
         data = await self.request(
             "GET", path, params={"fieldSelector": field_selector, "limit": limit}
         )
@@ -358,7 +356,11 @@ class KubeClient:
 
 
 def _cluster_wide_path(ref: ResourceRef) -> str:
-    base = f"/api/{ref.group_version}" if "/" not in ref.group_version else f"/apis/{ref.group_version}"
+    base = (
+        f"/api/{ref.group_version}"
+        if "/" not in ref.group_version
+        else f"/apis/{ref.group_version}"
+    )
     return f"{base}/{ref.plural}"
 
 

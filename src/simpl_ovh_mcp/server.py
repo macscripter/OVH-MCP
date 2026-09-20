@@ -238,9 +238,7 @@ def _register_resources(mcp: FastMCP, settings: Settings) -> None:
 # --------------------------------------------------------------------------- prompts ---
 def _register_prompts(mcp: FastMCP) -> None:
     @mcp.prompt
-    def deploy_simpl_open(
-        agents: str = "authority", domain: str = "", sizing: str = "demo"
-    ) -> str:
+    def deploy_simpl_open(agents: str = "authority", domain: str = "", sizing: str = "demo") -> str:
         """Walk through a full deployment on OVH, in order, checking as you go."""
         return (
             f"Deploy Simpl-Open on OVHcloud with these agents: {agents}. "

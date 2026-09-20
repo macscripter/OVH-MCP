@@ -162,6 +162,22 @@ northbound contract never fails because DOME failed, so a `200` proves nothing a
 **`degraded: false`** proves everything. When it is degraded, `bridge_dome_probe` calls the
 sandbox directly from the server and tells DOME's problem from ours.
 
+**Publication** (Increment 2, the write path) needs two Secrets in the agent's namespace
+and neither passes through a tool argument or result:
+
+```
+bridge_database_ensure ─► bridge_dome_credentials_ensure ─► bridge_deploy(publication=True,
+    dome_secret="bridge-dome") ─► bridge_publish_sample
+```
+
+`bridge_database_ensure` adds a `<agent>_bridge` role and database to the platform's
+postgres-operator cluster, exactly as the authority's own components get theirs, waits for
+the operator to mint the password and copies it into `bridge-database` shaped for Quarkus.
+`bridge_dome_credentials_ensure` writes the server's `DOME_DEV_TOKEN` variable into
+`bridge-dome`. `bridge_publish_sample` registers a sample self-description (202), then
+watches the operations ledger until the dispatcher has delivered it to the sandbox, and can
+retire it afterwards.
+
 The chart is vendored at `vendor/charts/bridge`; refresh it with
 `scripts/sync-bridge-chart.sh` after any change in the Bridge repository.
 
@@ -268,9 +284,11 @@ check, and a diagnosis that correctly identified that install's four real faults
   ServiceAccount token.
 * `infrastructure-provider` and `application-provider` have **no published stable chart**
   yet, so `simpl_install_agent` will ask you for an explicit version.
-* The Bridge chart models the **search half** of the Bridge, not publication: no datasource
-  block, no publication values. Until that lands, `config.extraProperties` and `extraEnv`
-  carry them — a way to demonstrate, not a way to run a service.
+* The Bridge chart models the **search half** of the Bridge; the publication path is wired
+  through its escape hatches (`extraEnvFrom` for the datasource, `config.extraProperties`
+  for the switches, `openbao.existingSecret` for the DOME token) by `bridge_deploy
+  (publication=True)`. It works; it should become first-class chart values in the Bridge
+  repository.
 * **ACME rate limits**: Let's Encrypt allows 50 certificates per registered domain per
   week, and a full deployment asks for a few dozen. Use `acme_staging=True` while iterating.
 

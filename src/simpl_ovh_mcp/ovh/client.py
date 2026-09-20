@@ -254,7 +254,9 @@ def _to_error(resp: httpx.Response) -> UpstreamError:
                 message = f"{message} ({payload['class']})"
     except (json.JSONDecodeError, ValueError):
         pass
-    return UpstreamError("OVH API", resp.status_code, message, OVH_HINTS.get(resp.status_code), detail)
+    return UpstreamError(
+        "OVH API", resp.status_code, message, OVH_HINTS.get(resp.status_code), detail
+    )
 
 
 _client: OvhClient | None = None

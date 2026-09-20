@@ -28,7 +28,7 @@ def test_common_values_carry_the_branch_and_agent_lists():
         agents={"authorities": ["authority01"]},
     )
     assert values["values"]["branch"] == "v4.0.9"
-    assert values["namespaceTag"] == "common01"           # a string, not a map
+    assert values["namespaceTag"] == "common01"  # a string, not a map
     assert values["agentList"]["authorities"] == ["authority01"]
     assert values["agentList"]["consumers"] == []
     assert values["cluster"]["issuer"] == "dev-prod-http"

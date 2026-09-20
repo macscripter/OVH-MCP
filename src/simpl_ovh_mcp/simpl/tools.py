@@ -437,9 +437,7 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
                 if acme_staging
                 else "https://acme-v02.api.letsencrypt.org/directory"
             )
-            manifests.append(
-                plat.acme_issuer(ISSUERS["public"], acme_email, server, ingress_class)
-            )
+            manifests.append(plat.acme_issuer(ISSUERS["public"], acme_email, server, ingress_class))
         elif mode == "ca":
             manifests.extend(plat.ca_issuer_bundle(ISSUERS["public"]))
         else:
@@ -449,7 +447,11 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         for manifest in manifests:
             await kube.apply(manifest)
             applied.append(f"{manifest['kind']}/{manifest['metadata']['name']}")
-        p.platform["issuers"] = {"mode": mode, "public": ISSUERS["public"], "internal": ISSUERS["internal"]}
+        p.platform["issuers"] = {
+            "mode": mode,
+            "public": ISSUERS["public"],
+            "internal": ISSUERS["internal"],
+        }
         store().save(p)
         get_guard().audit("simpl_setup_issuers", p.name, mode)
         return {
@@ -530,7 +532,8 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             "hostname": probe,
             "ingress": ingress,
             "public_resolution": public,
-            "matches_ingress": bool(public) and bool(ingress.get("addresses"))
+            "matches_ingress": bool(public)
+            and bool(ingress.get("addresses"))
             and str(ingress["addresses"][0]) in public,
         }
         if deep:
@@ -834,7 +837,12 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             health = await _namespace_health(kube, namespace)
             history.append({"at": _now(), **health})
             if health["pods"] and not health["unhealthy"]:
-                return {"namespace": namespace, "settled": True, "final": health, "history": history[-6:]}
+                return {
+                    "namespace": namespace,
+                    "settled": True,
+                    "final": health,
+                    "history": history[-6:],
+                }
             if time.monotonic() >= deadline:
                 return {
                     "namespace": namespace,
@@ -1171,9 +1179,7 @@ async def _preflight(kube: Any, profile: Profile) -> list[str]:
                 "including inside the cluster. Run ovh_dns_ensure_wildcard."
             )
     else:
-        blockers.append(
-            "The profile has no domain_suffix. Set it with ovh_dns_ensure_wildcard."
-        )
+        blockers.append("The profile has no domain_suffix. Set it with ovh_dns_ensure_wildcard.")
     return blockers
 
 
@@ -1200,10 +1206,16 @@ def _endpoints(profile: Profile) -> list[dict[str, str]]:
             ]
         elif kind == "consumer":
             out.append(
-                {"what": "Consumer front end", "url": f"https://consumer.fe.{ns}.{profile.domain_suffix}"}
+                {
+                    "what": "Consumer front end",
+                    "url": f"https://consumer.fe.{ns}.{profile.domain_suffix}",
+                }
             )
         else:
             out.append(
-                {"what": f"{kind} front end", "url": f"https://provider.fe.{ns}.{profile.domain_suffix}"}
+                {
+                    "what": f"{kind} front end",
+                    "url": f"https://provider.fe.{ns}.{profile.domain_suffix}",
+                }
             )
     return out

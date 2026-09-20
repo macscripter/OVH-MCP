@@ -16,6 +16,8 @@ Two things this module deliberately does not do:
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 import time
 from pathlib import Path
@@ -25,7 +27,7 @@ import httpx
 import yaml
 from fastmcp import FastMCP
 
-from ..errors import ConfigError, NotFound
+from ..errors import ConfigError, NotFound, SimplMcpError
 from ..guard import get_guard
 from ..helm.runner import runner_for
 from ..kube.session import get_kube
@@ -36,6 +38,18 @@ from ..toolkit import Toolkit
 SERVICE_NAME = "bridge"
 SERVICE_PORT = 8080
 NORTHBOUND_BASE = "/bridge/v1"
+
+# The publication path needs two Secrets in the agent's namespace. Neither ever holds a
+# value that came through a tool argument or a tool result.
+DATABASE_SECRET = "bridge-database"
+DOME_SECRET = "bridge-dome"
+PG_CLUSTER = "pg-cluster"
+SAMPLE_SD = (
+    Path(__file__).resolve().parents[3]
+    / "vendor"
+    / "bridge-samples"
+    / "governance-authority-ai-service-sample.json"
+)
 
 # What the Bridge needs from the platform, from the deployment notes of 18 September 2026.
 PLATFORM_NEEDS = [
@@ -52,8 +66,17 @@ PLATFORM_NEEDS = [
     {
         "need": "A PostgreSQL database (publication path only)",
         "detail": "The outbox: two tables created by Flyway at start-up, so the user needs DDL "
-        "on its own schema. Increment 1's read path holds no state and needs none.",
+        "on its own schema. Increment 1's read path holds no state and needs none. "
+        "bridge_database_ensure asks the platform's postgres-operator for the role and the "
+        "database and hands the credentials to the agent's namespace as a Secret.",
         "if_absent": "The publication path cannot start. Search is unaffected.",
+    },
+    {
+        "need": "A DOME token (publication path only)",
+        "detail": "Writes to the sandbox carry a static bearer token (bridge.dome.auth.mode="
+        "STATIC). Set DOME_DEV_TOKEN on this server and run bridge_dome_credentials_ensure; "
+        "the value goes straight into a Secret.",
+        "if_absent": "Registrations are accepted (202) but every delivery to DOME is refused.",
     },
     {
         "need": "Redis, or a decision not to cache",
@@ -138,6 +161,9 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         resource_preset: str = "small",
         dome_base_url: str | None = None,
         northbound_auth: bool = False,
+        publication: bool = False,
+        database_secret: str = DATABASE_SECRET,
+        dome_secret: str | None = None,
         extra_values: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build the Bridge's values for this deployment, and check them for credentials.
@@ -163,6 +189,8 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             resource_preset=resource_preset,
             dome_base_url=dome_base_url or settings.dome_base_url,
             northbound_auth=northbound_auth,
+            publication_secret=database_secret if publication else None,
+            dome_secret=dome_secret,
             extra_values=extra_values,
         )
         leaks = _looks_like_secret(values)
@@ -188,12 +216,20 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         dome_base_url: str | None = None,
         chart_path: str | None = None,
         dry_run: bool = False,
+        publication: bool = False,
+        database_secret: str = DATABASE_SECRET,
+        dome_secret: str | None = None,
         extra_values: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Install or upgrade the Bridge inside a Governance Authority agent.
 
         The agent's namespace must already hold a running authority — the Bridge is part of
         it, not a neighbour of it. `dry_run=True` renders without applying.
+
+        `publication=True` switches the write path on: the pod gets its datasource from
+        `database_secret` (made by bridge_database_ensure) and, when `dome_secret` is given
+        (made by bridge_dome_credentials_ensure), the DOME token from there. Without
+        `dome_secret` registrations are accepted but deliveries are refused by DOME.
         """
         p = get_store().resolve(profile)
         ns = namespace or _authority_namespace(p)
@@ -213,6 +249,20 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
                 "first with simpl_install_agent.",
             )
 
+        if not dry_run:
+            names = {x.get("name") for x in await kube.list("Secret", ns, limit=500)}
+            if publication and database_secret not in names:
+                raise NotFound(
+                    f"Secret '{database_secret}' not found in {ns}",
+                    "Run bridge_database_ensure first: it asks the postgres-operator for the "
+                    "Bridge's database and writes the credentials into that Secret.",
+                )
+            if dome_secret and dome_secret not in names:
+                raise NotFound(
+                    f"Secret '{dome_secret}' not found in {ns}",
+                    "Run bridge_dome_credentials_ensure first (DOME_DEV_TOKEN must be set on "
+                    "the server).",
+                )
         values = _build_values(
             common_namespace=p.common_namespace,
             image_tag=image_tag or settings.bridge_image_tag,
@@ -223,6 +273,8 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             replicas=replicas,
             resource_preset=resource_preset,
             dome_base_url=dome_base_url or settings.dome_base_url,
+            publication_secret=database_secret if publication else None,
+            dome_secret=dome_secret,
             extra_values=extra_values,
         )
         helm = await runner_for(p.name)
@@ -235,9 +287,13 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
                 "namespace": ns,
                 "release": SERVICE_NAME,
                 "image": f"{values['image'].get('registry') or ''}/"
-                f"{values['image']['repository']}:{values['image'].get('tag') or 'appVersion'}".lstrip("/"),
+                f"{values['image']['repository']}:{values['image'].get('tag') or 'appVersion'}".lstrip(
+                    "/"
+                ),
                 "deployed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "dome_base_url": values["dome"]["baseUrl"],
+                "publication": publication,
+                "dome_secret": dome_secret,
             }
             get_store().save(p)
             get_guard().audit("bridge_deploy", f"{p.name}/{ns}", "deployed")
@@ -247,12 +303,16 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             "release": SERVICE_NAME,
             "chart_path": str(path),
             "output": result.stdout[:3000],
+            "publication": publication,
             "next": "bridge_status, then bridge_search — a search with degraded:false is the "
-            "only proof that egress to DOME works.",
+            "only proof that egress to DOME works."
+            + (" Then bridge_publish_sample to prove the write path." if publication else ""),
         }
 
     @tk.read
-    async def bridge_status(profile: str | None = None, namespace: str | None = None) -> dict[str, Any]:
+    async def bridge_status(
+        profile: str | None = None, namespace: str | None = None
+    ) -> dict[str, Any]:
         """Is the Bridge running, ready, and configured the way you think it is?
 
         Reads the Deployment, the pods, the health endpoints and the rendered configuration.
@@ -315,7 +375,9 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
                     for line in properties.splitlines()
                     if "=" in line and not line.startswith("#")
                 )
-                if k.startswith(("bridge.dome", "bridge.cache", "bridge.search", "bridge.northbound"))
+                if k.startswith(
+                    ("bridge.dome", "bridge.cache", "bridge.search", "bridge.northbound")
+                )
             }
         except Exception:  # noqa: BLE001
             out["configuration"] = "no ConfigMap found"
@@ -452,6 +514,219 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             "with the page size.",
         }
 
+    @tk.write
+    async def bridge_database_ensure(
+        profile: str | None = None,
+        namespace: str | None = None,
+        secret_name: str = DATABASE_SECRET,
+        wait_seconds: int = 180,
+    ) -> dict[str, Any]:
+        """Give the Bridge its PostgreSQL database, the way the platform gives every component one.
+
+        Adds a role and a database named `<agent>_bridge` to the common components'
+        postgres-operator cluster, waits for the operator to mint the credentials, and copies
+        them into the agent's namespace as a Secret shaped for Quarkus
+        (QUARKUS_DATASOURCE_JDBC_URL / _USERNAME / _PASSWORD). Idempotent. The password is
+        read from one Secret and written into another; it is never returned or logged.
+        """
+        p = get_store().resolve(profile)
+        ns = namespace or _authority_namespace(p)
+        common = p.common_namespace
+        kube = await get_kube(p.name)
+        user = _database_user(ns)
+        operator_secret = _operator_secret_name(user)
+
+        cluster = await kube.get("postgresql", PG_CLUSTER, common)
+        spec = cluster.get("spec") or {}
+        patched = False
+        if user not in (spec.get("users") or {}) or user not in (spec.get("databases") or {}):
+            await kube.patch(
+                "postgresql",
+                PG_CLUSTER,
+                {"spec": {"users": {user: ["createdb"]}, "databases": {user: user}}},
+                common,
+            )
+            patched = True
+
+        deadline = time.monotonic() + wait_seconds
+        source: dict[str, Any] | None = None
+        while True:
+            try:
+                source = await kube.get("Secret", operator_secret, common)
+            except SimplMcpError:
+                source = None
+            data = (source or {}).get("data") or {}
+            if data.get("username") and data.get("password"):
+                break
+            if time.monotonic() > deadline:
+                raise NotFound(
+                    f"the postgres-operator has not created {common}/{operator_secret} "
+                    f"after {wait_seconds}s",
+                    "Check the operator with k8s_logs on pg-operator and the cluster object "
+                    f"with k8s_get(kind='postgresql', name='{PG_CLUSTER}', namespace='{common}').",
+                )
+            await asyncio.sleep(5)
+
+        jdbc_url = f"jdbc:postgresql://{PG_CLUSTER}.{common}.svc.cluster.local:5432/{user}"
+        manifest = _database_secret_manifest(
+            secret_name, ns, jdbc_url, data["username"], data["password"]
+        )
+        await kube.apply(manifest)
+        get_guard().audit("bridge_database_ensure", f"{p.name}/{ns}/{secret_name}", "ok")
+        return {
+            "namespace": ns,
+            "secret": secret_name,
+            "database": user,
+            "role": user,
+            "jdbc_url": jdbc_url,
+            "operator_secret": f"{common}/{operator_secret}",
+            "cluster_patched": patched,
+            "note": "The password went from the operator's Secret into this one and nowhere "
+            "else. Deploy with bridge_deploy(publication=True).",
+        }
+
+    @tk.write
+    async def bridge_dome_credentials_ensure(
+        profile: str | None = None,
+        namespace: str | None = None,
+        secret_name: str = DOME_SECRET,
+    ) -> dict[str, Any]:
+        """Write the DOME sandbox token into a Secret in the agent's namespace.
+
+        The token is read from this server's DOME_DEV_TOKEN environment variable — set it
+        as a deployment variable, not as a tool argument — and is never returned. The
+        chart then exposes it to the pod as DOME_DEV_TOKEN, which is what
+        `bridge.dome.auth.staticToken` reads.
+        """
+        token = settings.dome_dev_token
+        if not token:
+            raise ConfigError(
+                "DOME_DEV_TOKEN is not set on this server",
+                "Set it as an environment variable of the server (a Railway variable) and "
+                "redeploy; it is written into a Secret and never surfaces in a tool result.",
+            )
+        p = get_store().resolve(profile)
+        ns = namespace or _authority_namespace(p)
+        kube = await get_kube(p.name)
+        await kube.apply(_dome_secret_manifest(secret_name, ns, token))
+        get_guard().audit("bridge_dome_credentials_ensure", f"{p.name}/{ns}/{secret_name}", "ok")
+        return {
+            "namespace": ns,
+            "secret": secret_name,
+            "key": "token",
+            "bytes": len(token.encode("utf-8")),
+            "note": f"Deploy with bridge_deploy(publication=True, dome_secret='{secret_name}').",
+        }
+
+    @tk.write
+    async def bridge_publish_sample(
+        asset_id: str | None = None,
+        wait_seconds: int = 90,
+        retire_after: bool = False,
+        profile: str | None = None,
+        namespace: str | None = None,
+    ) -> dict[str, Any]:
+        """Prove the write path: register a sample AI-service self-description and watch it reach DOME.
+
+        Registration answers 202 at once (BRG-D-06: registration is not delivery); the
+        dispatcher claims the row a second later and delivers to the sandbox. This tool
+        polls the operations ledger until the operation is finished or `wait_seconds` pass.
+        `retire_after=True` registers a retirement afterwards so the sandbox is left as it
+        was found.
+        """
+        p = get_store().resolve(profile)
+        ns = namespace or (p.bridge or {}).get("namespace") or _authority_namespace(p)
+        kube = await get_kube(p.name)
+        if not SAMPLE_SD.exists():
+            raise ConfigError(f"sample self-description missing at {SAMPLE_SD}")
+        sd = json.loads(SAMPLE_SD.read_text(encoding="utf-8"))
+        asset = asset_id or f"simpl-ovh-mcp-{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}"
+        body = {"assetId": asset, "selfDescription": sd, "requestedBy": "simpl-ovh-mcp"}
+        status, text = await kube.service_proxy(
+            ns,
+            SERVICE_NAME,
+            SERVICE_PORT,
+            f"{NORTHBOUND_BASE}/publications",
+            method="POST",
+            json_body=body,
+            timeout=60,
+        )
+        registration = {"http_status": status, "body": _short_json(text)}
+        if status != 202:
+            return {
+                "asset_id": asset,
+                "registration": registration,
+                "verdict": "Registration refused. 404 means the publication routes are off "
+                "(deploy with publication=True); 503 means the database is unreachable.",
+            }
+        operations: list[Any] = []
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            _s2, t2 = await kube.service_proxy(
+                ns,
+                SERVICE_NAME,
+                SERVICE_PORT,
+                f"{NORTHBOUND_BASE}/operations?assetId={asset}",
+                timeout=30,
+            )
+            try:
+                parsed = json.loads(t2)
+            except json.JSONDecodeError:
+                parsed = []
+            operations = (
+                parsed
+                if isinstance(parsed, list)
+                else parsed.get("operations") or parsed.get("results") or [parsed]
+            )
+            done = [
+                o
+                for o in operations
+                if isinstance(o, dict)
+                and str(o.get("status", "")).upper()
+                in (
+                    "DELIVERED",
+                    "SUCCEEDED",
+                    "DONE",
+                    "COMPLETED",
+                    "FAILED",
+                    "REJECTED",
+                    "EXHAUSTED",
+                )
+            ]
+            if done or time.monotonic() > deadline:
+                break
+            await asyncio.sleep(5)
+        retirement = None
+        if retire_after:
+            s3, t3 = await kube.service_proxy(
+                ns,
+                SERVICE_NAME,
+                SERVICE_PORT,
+                f"{NORTHBOUND_BASE}/publications/{asset}",
+                method="DELETE",
+                timeout=60,
+            )
+            retirement = {"http_status": s3, "body": _short_json(t3)}
+        statuses = [str(o.get("status")) for o in operations if isinstance(o, dict)]
+        delivered = any(
+            x.upper() in ("DELIVERED", "SUCCEEDED", "DONE", "COMPLETED") for x in statuses
+        )
+        get_guard().audit(
+            "bridge_publish_sample",
+            f"{p.name}/{ns}/{asset}",
+            "delivered" if delivered else "pending",
+        )
+        return {
+            "asset_id": asset,
+            "registration": registration,
+            "operations": operations[:10],
+            "retirement": retirement,
+            "verdict": "Delivered to DOME."
+            if delivered
+            else "Registered, not (yet) delivered — read the operations' status and lastError; "
+            "a refused token shows there.",
+        }
+
     @tk.destructive
     async def bridge_uninstall(
         profile: str | None = None, namespace: str | None = None, confirm: str | None = None
@@ -508,6 +783,8 @@ def _build_values(
     resource_preset: str,
     dome_base_url: str,
     northbound_auth: bool = False,
+    publication_secret: str | None = None,
+    dome_secret: str | None = None,
     extra_values: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from ..simpl.values import deep_merge
@@ -526,9 +803,7 @@ def _build_values(
         "cache": {"enabled": cache_enabled},
         "redis": {"hosts": f"redis://redis.{common_namespace}.svc.cluster.local:6379"},
         "elk": {
-            "elasticsearch": {
-                "hosts": f"elasticsearch.{common_namespace}.svc.cluster.local:9200"
-            },
+            "elasticsearch": {"hosts": f"elasticsearch.{common_namespace}.svc.cluster.local:9200"},
             "metrics": {
                 "enabled": elk_metrics,
                 "host": f"http://elasticsearch.{common_namespace}.svc.cluster.local:9200",
@@ -541,7 +816,83 @@ def _build_values(
         values.setdefault("config", {})["extraProperties"] = (
             "# northbound authentication is the agent's Keycloak; set the client here\n"
         )
+    values = deep_merge(values, _publication_values(publication_secret, dome_secret))
     return deep_merge(values, extra_values)
+
+
+def _publication_values(database_secret: str | None, dome_secret: str | None) -> dict[str, Any]:
+    """The write path, as chart values. Only Secret NAMES appear here.
+
+    The datasource arrives as environment (envFrom the database Secret), which sits above
+    the mounted properties file in Quarkus' ordinal order; the switches go into
+    extraProperties because the chart does not model them yet.
+    """
+    out: dict[str, Any] = {}
+    if database_secret:
+        out["extraEnvFrom"] = [{"secretRef": {"name": database_secret}}]
+        out["config"] = {
+            "extraProperties": "bridge.publication.enabled=true\n"
+            "bridge.publication.dispatcherEnabled=true\n"
+        }
+    if dome_secret:
+        out["openbao"] = {
+            "enabled": True,
+            "mode": "existingSecret",
+            "existingSecret": {"name": dome_secret, "keys": {"DOME_DEV_TOKEN": "token"}},
+        }
+    return out
+
+
+def _database_user(namespace: str) -> str:
+    """The postgres-operator's naming: one role per agent component, agent prefix, underscores."""
+    return f"{namespace.replace('-', '_')}_bridge"
+
+
+def _operator_secret_name(user: str, cluster: str = PG_CLUSTER) -> str:
+    """Where the Zalando operator puts the credentials it mints (underscores become dashes)."""
+    return f"{user.replace('_', '-')}.{cluster}.credentials.postgresql.acid.zalan.do"
+
+
+def _database_secret_manifest(
+    name: str, namespace: str, jdbc_url: str, username_b64: str, password_b64: str
+) -> dict[str, Any]:
+    """A Secret that Quarkus reads through envFrom. Username and password are passed on
+    exactly as the operator encoded them; only the URL is encoded here."""
+    return {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": name,
+            "namespace": namespace,
+            "labels": {
+                "app.kubernetes.io/name": SERVICE_NAME,
+                "app.kubernetes.io/managed-by": "simpl-ovh-mcp",
+            },
+        },
+        "type": "Opaque",
+        "data": {
+            "QUARKUS_DATASOURCE_JDBC_URL": base64.b64encode(jdbc_url.encode()).decode(),
+            "QUARKUS_DATASOURCE_USERNAME": username_b64,
+            "QUARKUS_DATASOURCE_PASSWORD": password_b64,
+        },
+    }
+
+
+def _dome_secret_manifest(name: str, namespace: str, token: str) -> dict[str, Any]:
+    return {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": name,
+            "namespace": namespace,
+            "labels": {
+                "app.kubernetes.io/name": SERVICE_NAME,
+                "app.kubernetes.io/managed-by": "simpl-ovh-mcp",
+            },
+        },
+        "type": "Opaque",
+        "data": {"token": base64.b64encode(token.encode("utf-8")).decode()},
+    }
 
 
 SECRET_SHAPED = ("password", "secret", "token", "clientsecret", "apikey", "privatekey")
@@ -552,10 +903,14 @@ def _looks_like_secret(values: dict[str, Any], path: str = "") -> list[str]:
     found: list[str] = []
     for key, value in values.items():
         here = f"{path}.{key}" if path else key
+        if here.startswith("openbao.existingSecret.keys"):
+            continue  # ENV_NAME -> secret key: names of things, by the chart's contract
         if isinstance(value, dict):
             found += _looks_like_secret(value, here)
-        elif isinstance(value, str) and value and any(
-            marker in key.lower() for marker in SECRET_SHAPED
+        elif (
+            isinstance(value, str)
+            and value
+            and any(marker in key.lower() for marker in SECRET_SHAPED)
         ):
             found.append(f"{here} looks like a credential; use a Secret reference instead")
     return found

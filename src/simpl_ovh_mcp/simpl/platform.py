@@ -94,7 +94,9 @@ def acme_issuer(
     }
 
 
-def ca_issuer_bundle(name: str = ISSUERS["public"], namespace: str = "cert-manager") -> list[dict[str, Any]]:
+def ca_issuer_bundle(
+    name: str = ISSUERS["public"], namespace: str = "cert-manager"
+) -> list[dict[str, Any]]:
     """A private CA to sign everything with, for a deployment with no public DNS.
 
     Browsers will warn, and so will anything that validates the chain against a public
@@ -135,7 +137,9 @@ def ca_issuer_bundle(name: str = ISSUERS["public"], namespace: str = "cert-manag
 
 
 # --------------------------------------------------------------------------- storage ---
-def openbao_init_claim(common_namespace: str, storage_class: str = "nfs", size: str = "1Gi") -> dict[str, Any]:
+def openbao_init_claim(
+    common_namespace: str, storage_class: str = "nfs", size: str = "1Gi"
+) -> dict[str, Any]:
     """Pre-create the claim the OpenBao initialiser will make, bound to RWX storage.
 
     The chart's own template declares this claim with no storage class, so it would be
@@ -190,7 +194,9 @@ async def make_default_storage_class(kube: KubeClient, name: str) -> dict[str, A
                 {
                     "metadata": {
                         "annotations": {
-                            "storageclass.kubernetes.io/is-default-class": "true" if want else "false"
+                            "storageclass.kubernetes.io/is-default-class": "true"
+                            if want
+                            else "false"
                         }
                     }
                 },
@@ -238,7 +244,11 @@ async def resolve_in_cluster(
                         {
                             "name": "dns",
                             "image": image,
-                            "command": ["sh", "-c", f"nslookup {hostname} || getent hosts {hostname}"],
+                            "command": [
+                                "sh",
+                                "-c",
+                                f"nslookup {hostname} || getent hosts {hostname}",
+                            ],
                         }
                     ],
                 }

@@ -118,6 +118,9 @@ class Settings:
     bridge_image_registry: str = ""
     bridge_image_tag: str = ""
     dome_base_url: str = "https://tmf.sbx.evidenceledger.eu/tmf-api/productCatalogManagement"
+    # A DOME sandbox token for the publication path. Read from the environment, written
+    # into a Secret by bridge_dome_credentials_ensure, never returned by any tool.
+    dome_dev_token: str | None = None
 
     # --- Housekeeping -----------------------------------------------------------------
     state_dir: Path = field(default_factory=lambda: Path("./state"))
@@ -199,6 +202,7 @@ class Settings:
                 "DOME_BASE_URL",
                 "https://tmf.sbx.evidenceledger.eu/tmf-api/productCatalogManagement",
             ),
+            dome_dev_token=os.environ.get("DOME_DEV_TOKEN") or None,
             state_dir=resolved_state,
             http_timeout=float(_int("SIMPL_MCP_HTTP_TIMEOUT", 30)),
             long_timeout=float(_int("SIMPL_MCP_LONG_TIMEOUT", 600)),

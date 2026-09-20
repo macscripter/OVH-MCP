@@ -66,7 +66,9 @@ class Diagnosis:
     findings: list[Finding] = field(default_factory=list)
     checks: list[dict[str, Any]] = field(default_factory=list)
 
-    def add(self, severity: str, title: str, evidence: str, remedy: str, trap: str | None = None) -> None:
+    def add(
+        self, severity: str, title: str, evidence: str, remedy: str, trap: str | None = None
+    ) -> None:
         self.findings.append(Finding(severity, title, evidence, remedy, trap))
 
     def note(self, name: str, ok: bool, detail: Any = None) -> None:
@@ -216,7 +218,9 @@ async def diagnose(
                 "the project's quota with ovh_project_status.",
             )
         else:
-            probe = f"authority.fe.{next(iter(profile.agents), 'authority01')}.{profile.domain_suffix}"
+            probe = (
+                f"authority.fe.{next(iter(profile.agents), 'authority01')}.{profile.domain_suffix}"
+            )
             resolved = await resolve_public(probe)
             if not resolved:
                 d.add(
@@ -335,7 +339,9 @@ async def _check_namespace(
             continue
         unhealthy.append({"pod": pod["metadata"]["name"], "phase": phase, "waiting": waiting})
 
-    d.note(f"namespace:{namespace}", not unhealthy, {"pods": len(pods), "unhealthy": len(unhealthy)})
+    d.note(
+        f"namespace:{namespace}", not unhealthy, {"pods": len(pods), "unhealthy": len(unhealthy)}
+    )
     if not unhealthy:
         return
 
@@ -365,8 +371,7 @@ async def _check_namespace(
         if chain.get("initialised"):
             d.add(
                 "high",
-                f"The tier-2 components in {namespace} are not healthy, but the trust chain "
-                "exists",
+                f"The tier-2 components in {namespace} are not healthy, but the trust chain exists",
                 f"{', '.join(u['pod'] for u in tier2[:5])}. The identity provider already holds "
                 f"{chain.get('participant_count')} participant(s), so initialisation is not the "
                 "cause.",
@@ -400,7 +405,9 @@ async def _check_namespace(
         )
 
     pull_errors = [
-        u for u in unhealthy if any("ImagePull" in (r or "") or r == "ErrImagePull" for _, r in u["waiting"])
+        u
+        for u in unhealthy
+        if any("ImagePull" in (r or "") or r == "ErrImagePull" for _, r in u["waiting"])
     ]
     if pull_errors:
         d.add(
