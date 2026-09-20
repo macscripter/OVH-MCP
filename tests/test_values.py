@@ -96,3 +96,22 @@ def test_deep_merge_replaces_leaves_and_recurses_into_maps():
     base = {"a": {"b": 1, "c": 2}, "d": [1]}
     deep_merge(base, {"a": {"c": 3}, "d": [2]})
     assert base == {"a": {"b": 1, "c": 3}, "d": [2]}
+
+
+def test_agent_lists_merge_without_duplicates():
+    from simpl_ovh_mcp.simpl.tools import _merge_agent_lists
+
+    merged = _merge_agent_lists(
+        {"authorities": ["authority01"], "consumers": [], "providers": []},
+        {"authorities": ["authority01", "authority02"], "consumers": ["consumer01"]},
+    )
+    assert merged == {
+        "authorities": ["authority01", "authority02"],
+        "consumers": ["consumer01"],
+        "providers": [],
+    }
+    assert _merge_agent_lists({"authorities": [], "consumers": [], "providers": []}, None) == {
+        "authorities": [],
+        "consumers": [],
+        "providers": [],
+    }

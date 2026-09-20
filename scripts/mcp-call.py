@@ -65,7 +65,17 @@ async def main() -> None:
                 print(f"{t.name:32} {(t.description or '').splitlines()[0][:90]}")
             return
         result = await client.call_tool(tool, args)
-        data = result.data if hasattr(result, "data") else result
+        # structured_content is the server's own JSON; .data is FastMCP's re-hydration of it,
+        # which drops nested lists and dicts it has no schema for.
+        # The text block is the server's own JSON, verbatim. structured_content is the client's
+        # re-validated copy and .data its re-hydration; both drop nested content they have no
+        # schema for, which is how a log or a record list comes out as an empty {}.
+        texts = [c.text for c in getattr(result, "content", []) if hasattr(c, "text")]
+        data = texts[0] if len(texts) == 1 else (texts or getattr(result, "structured_content", None))
+        try:
+            data = json.loads(data) if isinstance(data, str) else data
+        except json.JSONDecodeError:
+            pass
         print(json.dumps(data, indent=2, default=str))
 
 

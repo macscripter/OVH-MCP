@@ -354,6 +354,23 @@ TRAPS: tuple[Trap, ...] = (
         "the same six calls as a Kubernetes job.",
     ),
     Trap(
+        key="agent-namespace-not-declared",
+        symptom="Every agent pod that needs a secret stays Pending or crash-loops; their "
+        "vault-env init logs say 'Code: 403 … namespace not authorized' against OpenBao; the "
+        "initialisation job loops on 'EJBCA is not ready yet'; the postgres-operator cluster "
+        "has no <agent>_* users.",
+        cause="The common components chart authorises OpenBao's Kubernetes auth and creates "
+        "PostgreSQL users ONLY for the namespaces in its agentList. When the common install "
+        "was rendered with an empty list — a fresh profile, or one whose agents were cleared "
+        "by a teardown — no agent namespace is authorised, and nothing later adds it: the "
+        "agent chart assumes the platform already knows it.",
+        remedy='Re-run simpl_install_common with agents={"authorities": ["authority01"]} '
+        "and force=True, wait for the common namespace to be healthy, then let the agent "
+        "recover on its own (or reinstall it). simpl_install_common now refuses an empty "
+        "list and simpl_install_agent refuses an undeclared namespace, so this stays a "
+        "one-time trap.",
+    ),
+    Trap(
         key="hyphen-in-agent-name",
         symptom="Hostnames come out malformed and the agent's ingresses never match.",
         cause="Agent names become part of an FQDN. A '-' in the name breaks it. The deployment "

@@ -605,6 +605,14 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         p = store().resolve(profile)
         kube = await get_kube(p.name)
         blockers = await _preflight(kube, p)
+        declared = _merge_agent_lists(_agents_from_profile(p), agents)
+        if not any(declared.values()):
+            blockers.append(
+                "No agent namespaces declared. The chart authorises OpenBao access and creates "
+                "PostgreSQL users only for the namespaces in agentList; an agent installed "
+                "later into an undeclared namespace fails with 'namespace not authorized' "
+                'and never initialises. Pass agents={"authorities": ["authority01"]}.'
+            )
         if blockers and not force:
             return {
                 "installed": False,
@@ -619,12 +627,13 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             resource_preset=resource_preset,
             monitoring=monitoring,
             ha=ha,
-            agents=agents,
+            agents=declared,
             extra_values=extra_values,
         )
         await kube.apply(manifest)
         p.chart_versions["common"] = manifest["spec"]["source"]["targetRevision"]
         p.platform["common_installed_at"] = _now()
+        p.platform["agent_list"] = declared
         store().save(p)
         get_guard().audit("simpl_install_common", f"{p.name}/{p.common_namespace}", "applied")
         return {
@@ -632,6 +641,7 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             "application": manifest["metadata"]["name"],
             "namespace": p.common_namespace,
             "chart": f"{CHARTS['common'].chart} {manifest['spec']['source']['targetRevision']}",
+            "agent_list": declared,
             "warnings": blockers if force else [],
             "next": "Watch it with simpl_status. The common components take 10-20 minutes and "
             "OpenBao has to initialise before anything else settles. Install agents only "
@@ -670,17 +680,27 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         validate_agent_namespace(namespace)
 
         if not force:
+            blockers: list[str] = []
             common_health = await _namespace_health(kube, p.common_namespace)
             if common_health["unhealthy"] or common_health["pods"] == 0:
+                blockers.append(
+                    f"The common components in '{p.common_namespace}' are not healthy "
+                    f"({common_health['pods']} pods, {common_health['unhealthy']} "
+                    "unhealthy). Agents consume them."
+                )
+            declared = p.platform.get("agent_list") or {}
+            if declared and namespace not in {n for ns in declared.values() for n in ns}:
+                blockers.append(
+                    f"'{namespace}' is not in the agent list the common components were "
+                    f"rendered with ({declared}). OpenBao will refuse its pods with 'namespace "
+                    "not authorized' and PostgreSQL will have no users for it. Re-run "
+                    f"simpl_install_common(agents=..., force=True) naming '{namespace}', wait "
+                    "for the common namespace to be healthy again, then install the agent."
+                )
+            if blockers:
                 return {
                     "installed": False,
-                    "blocked_by": [
-                        (
-                            f"The common components in '{p.common_namespace}' are not healthy "
-                            f"({common_health['pods']} pods, {common_health['unhealthy']} "
-                            "unhealthy). Agents consume them."
-                        )
-                    ],
+                    "blocked_by": blockers,
                     "hint": "Watch with simpl_status; diagnose with simpl_diagnose; or pass "
                     "force=True if you know what you are doing.",
                 }
@@ -1107,6 +1127,20 @@ def _agents_from_profile(profile: Profile) -> dict[str, list[str]]:
     for ns, kind in profile.agents.items():
         lists[AGENT_LIST_KEY.get(kind, "providers")].append(ns)
     return lists
+
+
+def _merge_agent_lists(
+    base: dict[str, list[str]], extra: dict[str, list[str]] | None
+) -> dict[str, list[str]]:
+    """Union of two agent lists, order kept, no duplicates, always all three keys."""
+    out: dict[str, list[str]] = {"authorities": [], "consumers": [], "providers": []}
+    for source in (base, extra or {}):
+        for key, names in source.items():
+            bucket = out.setdefault(key, [])
+            for n in names or []:
+                if n not in bucket:
+                    bucket.append(n)
+    return out
 
 
 async def _namespace_health(kube: Any, namespace: str, detail: bool = False) -> dict[str, Any]:
