@@ -377,6 +377,23 @@ TRAPS: tuple[Trap, ...] = (
         "simpl_install_agent an undeclared namespace, so this stays a one-time trap.",
     ),
     Trap(
+        key="child-application-never-syncs",
+        symptom="A deployer's Application reports Synced/Healthy while its sync operation "
+        "stays Running on 'waiting for completion of hook …'. The namespace holds two or "
+        "three pods instead of twelve or twenty-seven. The hook pod loops on 'EJBCA is not "
+        "ready yet', or fails to start because a ServiceAccount does not exist.",
+        cause="Both deployers are App-of-Apps: they generate child Applications "
+        "(<common>-openbao, <common>-vswh, <agent>-authority-iaa, "
+        "<agent>-authority-gaia-x-edc) that own most of the real workloads. A child left "
+        "behind by an earlier teardown is re-adopted OutOfSync with no operation, and "
+        "nothing ever starts it — while the parent's Sync hook waits for exactly the "
+        "services that child would create.",
+        remedy="Run simpl_sync_children (optionally with a namespace); it requests a sync for "
+        "every child that is OutOfSync and idle, and leaves the rest alone. Pods appear "
+        "within a minute. simpl_teardown now deletes child Applications, so a clean teardown "
+        "does not leave one behind.",
+    ),
+    Trap(
         key="teardown-namespace-stuck",
         symptom="After simpl_teardown the common or agent namespace stays Terminating for "
         "ten minutes or more; a reinstall then fails with 'unable to create new content in "

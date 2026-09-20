@@ -742,7 +742,9 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             "next": "Watch with simpl_status. The deployer generates an Application named "
             f"'{namespace}', and ArgoCD picks it up on its own reconciliation cycle — up to "
             "about three minutes, during which the namespace is empty and nothing appears to "
-            f"be happening. argocd_app_sync('{namespace}') starts it immediately. For an "
+            f"be happening. argocd_app_sync('{namespace}') starts it immediately, and "
+            "simpl_sync_children starts the child applications it generates — without them "
+            "the initialisation job waits for services that never appear. For an "
             "authority, tier2-gateway, tier2-proxy and users-roles stay unhealthy until the "
             "trust chain is initialised.",
         }
@@ -938,6 +940,58 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
             p.notes["authority_initialised"] = {"namespace": ns, "at": _now()}
             store().save(p)
         return {"namespace": ns, "reachability": reachable, **result}
+
+    @tk.write
+    async def simpl_sync_children(
+        namespace: str | None = None, profile: str | None = None
+    ) -> dict[str, Any]:
+        """Sync the child Applications an App-of-Apps generated but never started.
+
+        Both deployers generate child Applications — <common>-openbao, <common>-vswh,
+        <agent>-authority-iaa, <agent>-authority-gaia-x-edc. On a fresh cluster ArgoCD syncs
+        them itself; a child left over from an earlier install is re-adopted OutOfSync with
+        no operation and nothing restarts it. Its parent's Sync hook then waits forever for
+        services that child would have created: openbao-config with no ServiceAccount, or
+        the authority's initialisation job reporting 'EJBCA is not ready yet'.
+
+        Pass a namespace to limit it, or nothing to check every namespace this profile knows.
+        Children that are already syncing or Synced are left alone.
+        """
+        p = store().resolve(profile)
+        kube = await get_kube(p.name)
+        namespaces = [namespace] if namespace else [p.common_namespace, *p.agents]
+        apps = await kube.list("Application", "argocd", limit=300)
+        acted: list[dict[str, str]] = []
+        for app in apps:
+            name = (app.get("metadata") or {}).get("name") or ""
+            if name.endswith("-deployer") or name in namespaces:
+                continue
+            if not any(name.startswith(f"{ns}-") for ns in namespaces):
+                continue
+            status = app.get("status") or {}
+            sync = (status.get("sync") or {}).get("status")
+            phase = (status.get("operationState") or {}).get("phase")
+            if sync == "OutOfSync" and phase != "Running":
+                await kube.patch(
+                    "Application",
+                    name,
+                    {"operation": {"initiatedBy": {"username": "simpl-ovh-mcp"}, "sync": {}}},
+                    "argocd",
+                    "merge",
+                )
+                acted.append({"application": name, "action": "sync requested", "was": sync})
+            else:
+                acted.append(
+                    {"application": name, "action": "left alone", "was": f"{sync}/{phase}"}
+                )
+        get_guard().audit("simpl_sync_children", f"{p.name}/{','.join(namespaces)}", "checked")
+        return {
+            "namespaces": namespaces,
+            "children": acted,
+            "synced": [a["application"] for a in acted if a["action"] == "sync requested"],
+            "next": "Watch with k8s_pod_health; a parent stuck on its hook should move within "
+            "a minute of its child syncing.",
+        }
 
     @tk.destructive
     async def simpl_teardown(
