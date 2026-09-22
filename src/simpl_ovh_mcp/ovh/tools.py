@@ -133,7 +133,14 @@ def register(mcp: FastMCP, settings: Settings) -> Toolkit:
         client = ovh()
         service = client.project(project)
         out: dict[str, Any] = {"project_id": service}
-        out["project"] = await client.get(f"/cloud/project/{service}")
+        # A scoped token often grants /cloud/project/<id>/* without the bare path, because a
+        # wildcard after the slash does not match the resource itself. The description is the
+        # least useful part of this answer and the quota is the reason to call the tool at all,
+        # so a refusal here must not hide the two blocks below.
+        try:
+            out["project"] = await client.get(f"/cloud/project/{service}")
+        except UpstreamError as exc:
+            out["project"] = {"error": str(exc)}
         try:
             out["quotas"] = await client.get(f"/cloud/project/{service}/quota")
         except UpstreamError as exc:
