@@ -273,6 +273,20 @@ dome:
     grantType: client_credentials
     clientAuth: private_key_jwt        # private_key_jwt or client_secret_post
     tokenRequestTimeoutMs: 5000
+    ## The machine's key and its LEARCredentialMachine never appear in values: in VERIFIER
+    ## mode they reach the pod through `openbao` below, as the environment variables
+    ## BRIDGE_DOME_AUTH_PRIVATEKEYJWK and BRIDGE_DOME_AUTH_MACHINECREDENTIAL, and the chart
+    ## refuses to render VERIFIER mode without that wiring.
+    ## The presentation the Bridge signs: `aud` on both JWTs (empty = the issuer URL, which
+    ## the sandbox accepts, verified 2026-09-21) and whether the inner JWT carries a nonce
+    ## (DOME's reference does).
+    vp:
+      audience: ""
+      includeNonce: true
+    ## When the verifier cannot be reached, keep using the last token for up to this many
+    ## seconds past its expiry; DOME does not enforce exp. A rejected credential is never
+    ## served stale. 0 disables it.
+    maxStaleSeconds: 3600
 
 ## Read path budget and caller-side guardrails.
 ##
@@ -295,13 +309,22 @@ search:
   maxOffset: 10000
   ## How free-text criteria.keyword is rendered into TMF620 on this instance; TMF620 v4
   ## has no standard full-text operator, so this is pinned per environment alongside the
-  ## API version. One of NAME_EXACT, NAME_REGEX, UNSUPPORTED.
-  keywordStrategy: NAME_EXACT
+  ## API version. NAME_OR_DESCRIPTION_CONTAINS (the default) looks for the keyword in the
+  ## offering name and, in a second call, in its description, and merges the two answers
+  ## on the Bridge with the name hits first — this instance ANDs its filters, so the OR
+  ## cannot be asked of it in one request; comma-separated terms are searched one by one
+  ## and intersected, as the Simpl-Open quick search means them. NAME_CONTAINS sends one
+  ## call, name=%keyword% (the caller never types a % — the Bridge adds them); NAME_EXACT
+  ## sends the keyword bare for a case-sensitive exact match and attaches an advisory
+  ## saying it was narrowed.
+  ## One of NAME_OR_DESCRIPTION_CONTAINS, NAME_CONTAINS, NAME_EXACT, NAME_REGEX, UNSUPPORTED.
+  keywordStrategy: NAME_OR_DESCRIPTION_CONTAINS
 
-  ## What the search does with a criterion DOME would answer wrongly rather than refuse.
+  ## What the search does with a criterion DOME would answer wrongly rather than refuse —
+  ## as of 2026-09-21 that is criteria.lifecycleStatus, which DOME accepts and then ignores.
   ## REJECT answers 422 UNTRANSLATABLE_CRITERIA and names the defect; ALLOW_WITH_ADVISORY
-  ## forwards it and attaches a warning. REJECT is the default because an empty page that
-  ## looks like a legitimate answer is worse than a refusal.
+  ## forwards it and attaches a warning. REJECT is the default because an unfiltered page
+  ## that looks like a legitimate answer is worse than a refusal.
   ## One of REJECT, ALLOW_WITH_ADVISORY.
   defectPolicy: REJECT
 
@@ -417,9 +440,10 @@ openbao:
     ## Name of the Secret in this namespace. Required when mode is existingSecret.
     name: ""
     ## Map of ENVIRONMENT_VARIABLE -> key inside that Secret. Left empty by default
-    ## because Increment 1 needs no southbound credential; Increment 2 fills it in, e.g.
-    ##   BRIDGE_DOME_AUTH_CLIENTID: clientId
-    ##   BRIDGE_DOME_AUTH_CLIENTSECRET: clientSecret
+    ## because the read path needs no southbound credential. VERIFIER mode with a machine
+    ## credential needs exactly these two:
+    ##   BRIDGE_DOME_AUTH_PRIVATEKEYJWK: privateKeyJwk
+    ##   BRIDGE_DOME_AUTH_MACHINECREDENTIAL: machineCredential
     keys: {}
 
   injector:
@@ -439,15 +463,21 @@ openbao:
 ## Redis, backing the read cache (BRG-D-12). PostgreSQL remains the only source of truth;
 ## nothing is ever served from the cache that DOME did not return.
 redis:
-  ## Comma-separated Redis URIs. Point this at the common-components Redis of the agent.
-  hosts: redis://redis.common01.svc.cluster.local:6379
+  ## Comma-separated Redis URIs. Redis belongs to the AGENT, not to the common components:
+  ## a Simpl-Open agent namespace gets `redis-master` (with `redis-headless` beside it) and
+  ## the common components ship none, so a host under the common namespace resolves to
+  ## nothing. The cache then treats every lookup as a miss and never reports cacheHit=true,
+  ## which costs a round trip to DOME on every search and is invisible unless measured.
+  hosts: redis://redis-master.authority01.svc.cluster.local:6379
   ## Client timeout for a cache operation. Kept far below the search budget: waiting on the
   ## cache must never be why a search degrades.
   timeoutMs: 500
-  ## Password from an existing Secret. Leave the name empty for an unauthenticated Redis.
+  ## Password from an existing Secret. The agent's Redis is authenticated: the common
+  ## components write `redis-secrets` into each agent namespace with the password under the
+  ## key `redis`. Leave the name empty only for an unauthenticated Redis.
   existingSecret:
-    name: ""
-    passwordKey: redis-password
+    name: redis-secrets
+    passwordKey: redis
 
 ## Observability — the existing ELK stack only (BRG-D-13). No Prometheus, no OTLP.
 elk:

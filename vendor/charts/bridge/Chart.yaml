@@ -15,7 +15,16 @@ type: application
 
 # Chart version tracks the Bridge artefact version in pom.xml (1.0.0-INC1-SNAPSHOT), expressed in
 # SemVer 2 as a pre-release. appVersion is the application version the default image tag resolves to.
-version: 1.0.0-inc1
+#
+# The trailing counter moves when the CHART changes without the artefact version changing, which is
+# not cosmetic: the ArgoCD Application pins a chart version, and a chart republished under a version
+# that has already been pulled is not guaranteed to be picked up. 1.0.0-inc1.1 carried the
+# search.keywordStrategy value NAME_CONTAINS, and 1.0.0-inc1.2 carries NAME_OR_DESCRIPTION_CONTAINS;
+# each time the previous chart's own validation would have rejected the new value outright, so
+# shipping the image alone would have left the pod on the old strategy. 1.0.0-inc1.3 carries the
+# VERIFIER-mode wiring for the machine credential (dome.auth.vp, dome.auth.maxStaleSeconds and the
+# validation that refuses VERIFIER without the two secret references).
+version: 1.0.0-inc1.3
 appVersion: "1.0.0-INC1"
 
 # Probes use the v1 `startupProbe` semantics and the chart sets `seccompProfile` in the pod security

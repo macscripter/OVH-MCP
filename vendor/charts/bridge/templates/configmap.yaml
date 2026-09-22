@@ -112,6 +112,11 @@ data:
     bridge.dome.auth.grantType={{ .grantType }}
     bridge.dome.auth.clientAuth={{ .clientAuth }}
     bridge.dome.auth.tokenRequestTimeoutMs={{ int .tokenRequestTimeoutMs }}
+    {{- if and .vp .vp.audience }}
+    bridge.dome.auth.vp.audience={{ .vp.audience }}
+    {{- end }}
+    bridge.dome.auth.vp.includeNonce={{ if .vp }}{{ .vp.includeNonce }}{{ else }}true{{ end }}
+    bridge.dome.auth.maxStaleSeconds={{ int (default 3600 .maxStaleSeconds) }}
     {{- end }}
     {{- with .Values.retention }}
     bridge.retention.operationsDays={{ int .operationsDays }}

@@ -11,7 +11,7 @@ the Bridge runs inside the GA agent and uses one GA-level technical identity tow
 
 | | |
 |---|---|
-| Chart version | `1.0.0-inc1` |
+| Chart version | `1.0.0-inc1.1` — the trailing counter moves when the chart changes without the artefact version changing, which the ArgoCD Application pins by version |
 | App version | `1.0.0-INC1` (matches `pom.xml`) |
 | Objects rendered | ConfigMap, Service, Deployment |
 | Runtime | Java 25 on GraalVM for JDK 25, Quarkus 3.33 LTS, Apache Camel (BRG-D-04 / BRG-D-10) |
@@ -38,7 +38,7 @@ chain.
 ```yaml
 dependencies:
   - name: bridge
-    version: 1.0.0-inc1
+    version: 1.0.0-inc1.1
     repository: "file://charts/bridge"
     condition: bridge.enabled
 ```
@@ -253,7 +253,8 @@ host wrong. Clear the override to get the conventional behaviour back.
 
 * a credential appears in the values instead of a Secret reference;
 * `search.maxLimit`, `search.defaultLimit` or `search.maxOffset` exceeds the northbound contract;
-* `search.keywordStrategy` is not one of `NAME_EXACT`, `NAME_REGEX`, `UNSUPPORTED`;
+* `search.keywordStrategy` is not one of `NAME_OR_DESCRIPTION_CONTAINS`, `NAME_CONTAINS`, `NAME_EXACT`, `NAME_REGEX`, `UNSUPPORTED`;
+* `dome.auth.mode` is `VERIFIER` without `openbao.enabled`, or with `openbao.mode: existingSecret` whose `keys` do not map `BRIDGE_DOME_AUTH_PRIVATEKEYJWK` and `BRIDGE_DOME_AUTH_MACHINECREDENTIAL`;
 * `search.timeoutMs` is not positive, or `resilience.timeout.maxMs < baseMs`;
 * `terminationGracePeriodSeconds` is shorter than `resilience.timeout.maxMs`;
 * `cache.enabled` is true with no `redis.hosts`;

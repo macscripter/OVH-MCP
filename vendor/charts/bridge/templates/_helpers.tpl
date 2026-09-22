@@ -170,8 +170,8 @@ OpenBao block that names no path, or a credential typed into a values file.
 {{- if or (lt (int .Values.search.maxOffset) 0) (gt (int .Values.search.maxOffset) 10000) -}}
 {{- fail (printf "bridge: search.maxOffset must be between 0 and 10000 (the northbound contract's ceiling); got %v" .Values.search.maxOffset) -}}
 {{- end -}}
-{{- if not (has .Values.search.keywordStrategy (list "NAME_EXACT" "NAME_REGEX" "UNSUPPORTED")) -}}
-{{- fail (printf "bridge: search.keywordStrategy must be NAME_EXACT, NAME_REGEX or UNSUPPORTED; got %q" .Values.search.keywordStrategy) -}}
+{{- if not (has .Values.search.keywordStrategy (list "NAME_OR_DESCRIPTION_CONTAINS" "NAME_CONTAINS" "NAME_EXACT" "NAME_REGEX" "UNSUPPORTED")) -}}
+{{- fail (printf "bridge: search.keywordStrategy must be NAME_OR_DESCRIPTION_CONTAINS, NAME_CONTAINS, NAME_EXACT, NAME_REGEX or UNSUPPORTED; got %q" .Values.search.keywordStrategy) -}}
 {{- end -}}
 
 {{- /* A timeout budget that cannot expire is not a budget. */ -}}
@@ -191,6 +191,21 @@ OpenBao block that names no path, or a credential typed into a values file.
 {{- /* A cache with no Redis behind it would degrade every search into a cache miss plus a log line. */ -}}
 {{- if and .Values.cache.enabled (not .Values.redis.hosts) -}}
 {{- fail "bridge: cache.enabled is true but redis.hosts is empty — set bridge.redis.hosts, or set bridge.cache.enabled=false (BRG-D-12)." -}}
+{{- end -}}
+
+{{- /* VERIFIER mode needs the key and the credential, and they can only come through openbao. */ -}}
+{{- if eq (upper (toString .Values.dome.auth.mode)) "VERIFIER" -}}
+{{- if not .Values.openbao.enabled -}}
+{{- fail "bridge: dome.auth.mode is VERIFIER but openbao.enabled is false: the machine key and the LEARCredentialMachine reach the pod only through openbao (existingSecret or injector)." -}}
+{{- end -}}
+{{- if and (eq .Values.openbao.mode "existingSecret") (eq .Values.dome.auth.clientAuth "private_key_jwt") -}}
+{{- if not (hasKey .Values.openbao.existingSecret.keys "BRIDGE_DOME_AUTH_PRIVATEKEYJWK") -}}
+{{- fail "bridge: dome.auth.mode is VERIFIER with private_key_jwt but openbao.existingSecret.keys does not map BRIDGE_DOME_AUTH_PRIVATEKEYJWK." -}}
+{{- end -}}
+{{- if not (hasKey .Values.openbao.existingSecret.keys "BRIDGE_DOME_AUTH_MACHINECREDENTIAL") -}}
+{{- fail "bridge: dome.auth.mode is VERIFIER with private_key_jwt but openbao.existingSecret.keys does not map BRIDGE_DOME_AUTH_MACHINECREDENTIAL." -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{- /* OpenBao (BRG-D-14). */ -}}
