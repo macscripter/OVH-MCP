@@ -24,7 +24,7 @@ type: application
 # shipping the image alone would have left the pod on the old strategy. 1.0.0-inc1.3 carries the
 # VERIFIER-mode wiring for the machine credential (dome.auth.vp, dome.auth.maxStaleSeconds and the
 # validation that refuses VERIFIER without the two secret references).
-version: 1.0.0-inc1.3
+version: 1.0.0-inc1.5
 appVersion: "1.0.0-INC1"
 
 # Probes use the v1 `startupProbe` semantics and the chart sets `seccompProfile` in the pod security
@@ -52,4 +52,4 @@ annotations:
     BRG-D-03 (deployed inside the GA agent, one GA-level technical identity towards DOME),
     BRG-D-04 (Apache Camel), BRG-D-08 / BRG-D-11 (TM Forum version pinned per environment, TMF620 v4),
     BRG-D-09 (Helm sub-chart gated by bridge.enabled), BRG-D-10 (Java 25 / Quarkus 3.33 LTS),
-    BRG-D-12 (Redis read cache), BRG-D-13 (ELK-only observability), BRG-D-14 (secrets from OpenBao).
+    BRG-D-12 (Redis read cache, off by default), BRG-D-13 (ELK-only observability), BRG-D-14 (secrets from OpenBao).

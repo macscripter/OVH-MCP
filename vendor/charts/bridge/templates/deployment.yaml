@@ -37,6 +37,18 @@ spec:
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- if .Values.metrics.scrape.enabled }}
+        # Scrape hints: the agent's Metricbeat (autodiscover, prometheus module) and the
+        # usual Prometheus conventions, both pointing at /q/metrics on the http port.
+        co.elastic.metrics/module: prometheus
+        co.elastic.metrics/metricsets: collector
+        co.elastic.metrics/hosts: "${data.host}:{{ int .Values.containerPorts.http }}"
+        co.elastic.metrics/metrics_path: {{ .Values.metrics.scrape.path }}
+        co.elastic.metrics/period: {{ int .Values.metrics.scrape.periodSeconds }}s
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ int .Values.containerPorts.http | quote }}
+        prometheus.io/path: {{ .Values.metrics.scrape.path }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "bridge.serviceAccountName" . }}
       automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
@@ -93,7 +105,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            {{- if .Values.redis.existingSecret.name }}
+            {{- /* Only with the cache on: a namespace without Redis has no redis-secrets to reference. */}}
+            {{- if and .Values.cache.enabled .Values.redis.existingSecret.name }}
             - name: QUARKUS_REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:

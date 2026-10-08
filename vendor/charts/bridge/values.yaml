@@ -71,7 +71,7 @@ updateStrategy:
     maxUnavailable: 0
 
 ## A DOME call can legitimately be in flight for the whole timeout budget
-## (`resilience.timeout.maxMs`, 20 s). The grace period is deliberately longer than that
+## (`resilience.timeout.maxMs`, 9 s). The grace period is deliberately longer than that
 ## plus the Quarkus shutdown timeout, so a rollout never truncates a live search.
 terminationGracePeriodSeconds: 45
 
@@ -331,8 +331,14 @@ search:
 ## Redis read cache, cache-aside with TTL (BRG-D-12). A cached page can be up to
 ## `ttlSeconds` stale; DOME stays authoritative. Cache faults are never fatal — an
 ## unreachable Redis is logged and treated as a miss.
+##
+## OFF by default since 30 Sep 2026: every search goes live to DOME. The cache cannot be
+## invalidated (DOME publishes no change feed), so on the Bridge's own publish-then-search
+## path it would hide a new offering for up to `ttlSeconds`. Turn it on only when DOME
+## rate-limits the Bridge, asks it for less load, or the DOME block's latency passes an
+## agreed limit, and set `redis.hosts` with it: an enabled cache with no host fails the render.
 cache:
-  enabled: true
+  enabled: false
   ttlSeconds: 300
   ## Namespace for cache keys. Carries the northbound contract version so a v2 Bridge can
   ## never read v1 entries.
@@ -342,9 +348,11 @@ cache:
   failureCooldownSeconds: 30
   ## Payloads larger than this are passed through but not cached (1 MiB).
   maxValueBytes: 524288
-  ## Cache empty result pages too. "Nothing matched" is a legitimate, cacheable answer,
-  ## and an offset past the end of the collection is DOME's most expensive request.
-  cacheEmptyPages: true
+  ## Cache empty result pages too. An offset past the end of the collection is DOME's most
+  ## expensive request, but "nothing matched" is also the first answer to go stale when this
+  ## Bridge publishes: it would hide a new offering for `ttlSeconds`. Leave it off wherever
+  ## the Bridge publishes.
+  cacheEmptyPages: false
 
 ## Timeout / retry / breaker tuning consumed by the resilience layer around the southbound
 ## call (eu.europa.ec.simpl.bridge.resilience.ResilienceConfig, keys bridge.resilience.*).
@@ -361,7 +369,7 @@ resilience:
     offsetScaling: true
     baseMs: 4000
     perOffsetMs: 120
-    maxMs: 20000
+    maxMs: 9000
   retry:
     maxAttempts: 3
     initialBackoffMs: 200
@@ -460,26 +468,41 @@ openbao:
 # Backing services
 # -------------------------------------------------------------------------------------
 
-## Redis, backing the read cache (BRG-D-12). PostgreSQL remains the only source of truth;
-## nothing is ever served from the cache that DOME did not return.
+## Redis, backing the read cache (BRG-D-12), and unused while `cache.enabled` is false, which
+## is the default. PostgreSQL remains the only source of truth; nothing is ever served from
+## the cache that DOME did not return.
 redis:
-  ## Comma-separated Redis URIs. Redis belongs to the AGENT, not to the common components:
-  ## a Simpl-Open agent namespace gets `redis-master` (with `redis-headless` beside it) and
-  ## the common components ship none, so a host under the common namespace resolves to
-  ## nothing. The cache then treats every lookup as a miss and never reports cacheHit=true,
-  ## which costs a round trip to DOME on every search and is invisible unless measured.
-  hosts: redis://redis-master.authority01.svc.cluster.local:6379
+  ## Comma-separated Redis URIs, read only when `cache.enabled` is true, and empty on purpose
+  ## so that turning the cache on forces a choice of host. Redis belongs to the AGENT, not to
+  ## the common components: a Simpl-Open agent namespace gets `redis-master` (with
+  ## `redis-headless` beside it), so the usual value is
+  ## redis://redis-master.<agent-namespace>.svc.cluster.local:6379. A host under the common
+  ## namespace resolves to nothing; the cache then treats every lookup as a miss, which costs
+  ## a round trip on every search and is invisible unless measured.
+  hosts: ""
   ## Client timeout for a cache operation. Kept far below the search budget: waiting on the
   ## cache must never be why a search degrades.
   timeoutMs: 500
   ## Password from an existing Secret. The agent's Redis is authenticated: the common
   ## components write `redis-secrets` into each agent namespace with the password under the
-  ## key `redis`. Leave the name empty only for an unauthenticated Redis.
+  ## key `redis`. Leave the name empty only for an unauthenticated Redis. Referenced only when
+  ## `cache.enabled` is true, so a namespace without Redis needs no such Secret.
   existingSecret:
     name: redis-secrets
     passwordKey: redis
 
-## Observability — the existing ELK stack only (BRG-D-13). No Prometheus, no OTLP.
+## Observability (BRG-D-13 as amended on 8 October 2026): JSON logs for Filebeat, the
+## Prometheus text format at /q/metrics for Metricbeat or a Prometheus server, and the
+## existing ELK stack of the agent as the audit sink. No OTLP.
+metrics:
+  ## /q/metrics is served on the http port in the Prometheus text format. The annotations
+  ## rendered when `scrape.enabled` is true let the agent's Metricbeat (autodiscover hints,
+  ## prometheus module) and any Prometheus server find it without further configuration.
+  scrape:
+    enabled: true
+    path: /q/metrics
+    periodSeconds: 30
+
 elk:
   ## Elasticsearch target for the Camel audit route
   ## (camel-quarkus-elasticsearch-rest-client).
@@ -489,11 +512,11 @@ elk:
       name: ""
       usernameKey: username
       passwordKey: password
-  ## Micrometer Elastic registry. There is no Quarkus extension for it — the plain
-  ## Micrometer registry is exposed as a CDI bean and configured under
-  ## `bridge.metrics.elastic.*`.
+  ## Micrometer Elastic push registry, optional. There is no Quarkus extension for it — the
+  ## plain Micrometer registry is exposed as a CDI bean and configured under
+  ## `bridge.metrics.elastic.*`. Off by default: the agent's monitoring scrapes /q/metrics.
   metrics:
-    enabled: true
+    enabled: false
     host: http://elasticsearch.common01.svc.cluster.local:9200
     index: simpl-bridge-metrics
     stepSeconds: 60

@@ -59,11 +59,15 @@ data:
     camel.context.name={{ include "bridge.fullname" . }}
 
     # ---- Redis read cache (BRG-D-12) -------------------------------------------------
+    {{- if .Values.cache.enabled }}
     quarkus.redis.hosts={{ .Values.redis.hosts }}
     quarkus.redis.timeout={{ int .Values.redis.timeoutMs }}ms
     {{- if .Values.redis.existingSecret.name }}
     # quarkus.redis.password is injected as QUARKUS_REDIS_PASSWORD from Secret
     # {{ .Values.redis.existingSecret.name }} — never rendered here.
+    {{- end }}
+    {{- else }}
+    # The read cache is off (cache.enabled=false), so no Redis is configured or dialled.
     {{- end }}
 
     # ---- Elasticsearch audit sink (BRG-D-13) -----------------------------------------
@@ -73,11 +77,14 @@ data:
     # {{ .Values.elk.elasticsearch.existingSecret.name }}.
     {{- end }}
 
-    # ---- Micrometer, Elastic registry (BRG-D-13) -------------------------------------
-    # No Prometheus and no OTLP: the decision is ELK only. There is no Quarkus extension
-    # for the Elastic registry, so the plain Micrometer registry is produced as a CDI bean
-    # from this bridge.metrics.elastic.* tree.
+    # ---- Micrometer (BRG-D-13 as amended on 8 October 2026) --------------------------
+    # /q/metrics serves the Prometheus text format on the http port; the pod annotations
+    # (metrics.scrape.*) point Metricbeat or a Prometheus server at it. The Elastic push
+    # registry below is optional: there is no Quarkus extension for it, so the plain
+    # Micrometer registry is produced as a CDI bean from this bridge.metrics.elastic.* tree.
     quarkus.micrometer.enabled=true
+    quarkus.micrometer.export.prometheus.enabled=true
+    quarkus.micrometer.export.prometheus.path={{ trimPrefix "/q/" .Values.metrics.scrape.path }}
     bridge.metrics.elastic.enabled={{ .Values.elk.metrics.enabled }}
     {{- if .Values.elk.metrics.enabled }}
     bridge.metrics.elastic.host={{ .Values.elk.metrics.host }}

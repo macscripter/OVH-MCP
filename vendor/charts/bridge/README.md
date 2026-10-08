@@ -54,8 +54,6 @@ bridge:
   dome:
     baseUrl: https://tmf.sbx.evidenceledger.eu/tmf-api/productCatalogManagement
     apiVersion: v4
-  redis:
-    hosts: redis://redis.common01.svc.cluster.local:6379
 ```
 
 `bridge.enabled` does double duty. The dependency condition drops every manifest when it is false,
@@ -126,7 +124,7 @@ all", which is exactly the outcome the design forbids. A cache fault is a miss; 
 not on the request path.
 
 **The pod outlives its own timeout budget.** `terminationGracePeriodSeconds` (45 s) is longer than
-`resilience.timeout.maxMs` (20 s) plus the Quarkus shutdown timeout, so a rolling update never
+`resilience.timeout.maxMs` (9 s) plus the Quarkus shutdown timeout, so a rolling update never
 truncates a live DOME search. The chart fails to render if someone shortens the grace period below
 the timeout budget.
 
@@ -145,33 +143,57 @@ With `management.enabled: true` (the default) the health endpoints are served on
 management interface on port 9000, off the application port. The probes follow the setting
 automatically; the Service exposes the management port only if `service.exposeManagement` is set.
 
-### Read cache (BRG-D-12)
+### Read cache (BRG-D-12), off by default
 
 Cache-aside with TTL in Redis. A cached page can be up to `cache.ttlSeconds` (300) stale; DOME stays
 authoritative, and nothing is ever served that DOME did not return. `cache.keyPrefix` carries the
 northbound contract version (`simpl:bridge:v1:…`) so a future v2 cannot read v1 entries.
 
-Setting `cache.enabled: true` with an empty `redis.hosts` fails the render — that combination
-produces a Bridge that logs a cache miss on every single search and looks healthy while doing it.
+Since 30 September 2026 `cache.enabled` defaults to `false` and every search goes live to DOME. The
+cache cannot be invalidated, because DOME publishes no change feed, and on the Bridge's own
+publish-then-search path it would hide a new offering for up to one TTL. The code is kept, and the
+test suite still exercises it against an in-process Redis, for the day DOME rate-limits the Bridge,
+asks it for less load, or the latency of the DOME block passes an agreed limit.
 
-### Observability (BRG-D-13) — ELK only
+With the cache off the chart renders no Redis address and no reference to the Redis Secret, so a
+namespace without Redis needs nothing. To turn it on, set both keys:
 
-* JSON logs to stdout (`quarkus-logging-json`), for Filebeat.
+```yaml
+bridge:
+  cache:
+    enabled: true
+    cacheEmptyPages: false   # keep it off wherever this Bridge publishes
+  redis:
+    hosts: redis://redis-master.<agent-namespace>.svc.cluster.local:6379
+```
+
+`redis.hosts` is empty by default on purpose. Setting `cache.enabled: true` without it fails the
+render — that combination produces a Bridge that logs a cache miss on every single search and looks
+healthy while doing it.
+
+### Observability (BRG-D-13, amended 8 October 2026)
+
+* JSON logs to stdout (`quarkus-logging-json`), for the agent's Filebeat.
+* `/q/metrics` in the **Prometheus text format** on the http port (`quarkus-micrometer-registry-prometheus`).
+  With `metrics.scrape.enabled` (the default) the pods carry the Metricbeat autodiscover hints
+  (`co.elastic.metrics/*`, prometheus module) and the `prometheus.io/*` annotations, so the
+  agent's monitoring (BP12B, the eck-monitoring chart) and any Prometheus server find the
+  endpoint without further configuration. `metrics.scrape.path` and `periodSeconds` tune it.
 * Camel audit route to Elasticsearch at `elk.elasticsearch.hosts`.
-* Micrometer with the **Elastic** registry, configured under `bridge.metrics.elastic.*`.
+* Micrometer's **Elastic** push registry as an option, `elk.metrics.enabled` (default `false`),
+  configured under `bridge.metrics.elastic.*`.
 
-No Prometheus, no OTLP. Two consequences worth stating rather than discovering:
+No OTLP. Two details worth stating rather than discovering:
 
 1. There is no Quarkus extension for the Micrometer Elastic registry (Quarkus ships Prometheus;
-   Quarkiverse covers Datadog, Influx, OTLP and others, not Elastic), so the registry is a plain
+   Quarkiverse covers Datadog, Influx, OTLP and others, not Elastic), so that registry is a plain
    Micrometer bean produced by the application — `ElasticMeterRegistryProducer` — and configured
    from the `bridge.metrics.elastic.*` keys this chart renders. Micrometer's own `elastic.*` options
    are all reachable under that prefix, so a key this chart does not model can still be set through
    `config.extraProperties`.
-2. The Elastic registry is push-only: metrics arrive in Elasticsearch on the `elk.metrics.stepSeconds`
-   interval and nothing scrapes the pod. `/q/metrics` is nevertheless served, by Micrometer's JSON
-   exporter (`quarkus.micrometer.export.json.*`), which is what lets an operator read the current
-   values without adding Prometheus. The probes do not depend on it.
+2. The Elastic registry is push-only: when enabled, metrics arrive in Elasticsearch on the
+   `elk.metrics.stepSeconds` interval. It duplicates what the scrape already delivers, which is why
+   it is off by default. The probes depend on neither.
 
 ### Secrets — OpenBao (BRG-D-14)
 
